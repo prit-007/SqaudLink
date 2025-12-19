@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Squad Link Icon Generator</title>
+  <style>
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background: #000;
+      gap: 20px;
+    }
+    .icon-container {
+      display: flex;
+      gap: 40px;
+      align-items: center;
+    }
+    p {
+      color: #888;
+      font-family: system-ui;
+    }
+  </style>
+</head>
+<body>
+  <p>Right-click icons and "Save Image As..." to download</p>
+  <div class="icon-container">
+    <!-- 192x192 Icon -->
+    <svg width="192" height="192" viewBox="0 0 192 192" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="192" height="192" rx="48" fill="url(#grad1)"/>
+      <path d="M128 72V64C128 57.3726 122.627 52 116 52H52C45.3726 52 40 57.3726 40 64V100C40 106.627 45.3726 112 52 112H64M64 112V136L88 112H140C146.627 112 152 106.627 152 100V72C152 65.3726 146.627 60 140 60H128" stroke="white" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+      <defs>
+        <linearGradient id="grad1" x1="0" y1="0" x2="192" y2="192" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#9333ea"/>
+          <stop offset="1" stop-color="#4f46e5"/>
+        </linearGradient>
+      </defs>
+    </svg>
+    
+    <!-- 512x512 Icon -->
+    <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="512" height="512" rx="128" fill="url(#grad2)"/>
+      <path d="M341 192V170C341 156.745 330.255 146 317 146H139C125.745 146 115 156.745 115 170V267C115 280.255 125.745 291 139 291H171M171 291V363L235 291H373C386.255 291 397 280.255 397 267V192C397 178.745 386.255 168 373 168H341" stroke="white" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+      <defs>
+        <linearGradient id="grad2" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#9333ea"/>
+          <stop offset="1" stop-color="#4f46e5"/>
+        </linearGradient>
+      </defs>
+    </svg>
+  </div>
+  <p>Squad Link App Icons - 192x192 and 512x512</p>
+</body>
+</html>

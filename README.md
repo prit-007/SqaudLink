@@ -1,6 +1,27 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
-## Getting Started
+## 🚀 Quick Setup
+
+### 1. Database Setup (Supabase)
+
+Run these SQL files in your Supabase SQL Editor in order:
+
+1. **`db/database.sql`** - Main database schema
+2. **`db/create_chat_function.sql`** - Atomic chat creation function ⚠️ **REQUIRED** to fix RLS race condition
+3. **`db/storage_setup.sql`** - Storage bucket for image uploads
+
+> **Note:** The `create_chat_function.sql` uses an RPC function to create conversations atomically, avoiding the race condition where SELECT policy fails before participants are added.
+
+### 2. Environment Variables
+
+Create a `.env.local` file with your Supabase credentials:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=your-project-url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+```
+
+### 3. Install Dependencies & Run
 
 First, run the development server:
 
