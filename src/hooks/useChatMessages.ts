@@ -5,24 +5,34 @@ import { createClient } from '@/utils/supabase/client'
 import { CryptoService } from '@/utils/crypto-service'
 import { uploadMedia } from '@/utils/uploadMedia'
 
+export type MessageStatus = 'sending' | 'sent' | 'read';
+
 export type Message = {
-  id: string
-  conversation_id: string
-  sender_id: string
-  content: string
-  media_url?: string
-  media_type?: string
-  reply_to_id?: string
-  created_at: string
-  updated_at?: string
-  is_edited?: boolean
-  is_deleted?: boolean
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  content: string;
+  media_url?: string;
+  message_type?: 'text' | 'image' | 'voice' | 'video' | 'file';
+  media_type?: string; // MIME type
+  reply_to_id?: string;
+  created_at: string;
+  updated_at?: string;
+  is_edited?: boolean;
+  is_deleted?: boolean;
+  status?: MessageStatus;
+  delivery_status?: 'sent' | 'delivered' | 'read';
+  voice_duration?: number;
+  voice_waveform?: number[];
+  quoted_text?: string;
+  quoted_sender_id?: string;
+  quoted_sender_name?: string;
   // UI-only fields
-  is_optimistic?: boolean
-  sender_name?: string
-  sender_avatar?: string
-  reactions?: any[]
-}
+  is_optimistic?: boolean;
+  sender_name?: string;
+  sender_avatar?: string;
+  reactions?: any[];
+};
 
 export type SendMessageParams = {
   text: string
@@ -30,12 +40,17 @@ export type SendMessageParams = {
   mediaUrl?: string
   mediaType?: string
   replyToId?: string
+  quotedText?: string
+  quotedSenderId?: string
+  voiceDuration?: number
+  voiceWaveform?: number[]
 }
 
 export function useChatMessages(conversationId: string, myUserId: string) {
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isTyping, setIsTyping] = useState(false)
+  const [typingUsers, setTypingUsers] = useState<string[]>([])
   const supabase = createClient()
   const scrollRef = useRef<HTMLDivElement>(null)
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -66,13 +81,44 @@ export function useChatMessages(conversationId: string, myUserId: string) {
           // Try to decrypt if E2EE is enabled
           if (CryptoService.isInitialized() && msg.content) {
             try {
-              const parsed = JSON.parse(msg.content)
+              // Handle if content is already an object
+              const parsed = typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content
               if (parsed.content && parsed.deviceKeys) {
                 decryptedContent = await CryptoService.decryptMessage(parsed)
+                // Ensure decrypted content is a string
+                if (typeof decryptedContent !== 'string') {
+                  console.warn('Decryption returned non-string:', decryptedContent)
+                  decryptedContent = '[Encrypted message]'
+                }
               }
-            } catch {
+            } catch (error) {
               // Not encrypted or parse error, use as-is
+              console.warn('E2EE decryption failed:', error)
             }
+          }
+          
+          // Final safety check: ensure content is always a string
+          if (typeof decryptedContent !== 'string') {
+            console.error('Content is not a string:', decryptedContent)
+            decryptedContent = '[Message format error]'
+          }
+
+          // Fetch reactions for this message
+          const { data: reactionsData } = await supabase
+            .from('message_reactions')
+            .select('emoji, user_id')
+            .eq('message_id', msg.id)
+
+          // Fetch quoted sender's username if reply exists
+          let quotedSenderName = null
+          if (msg.reply_to_id && msg.quoted_sender_id) {
+            const { data: quotedSender } = await supabase
+              .from('profiles')
+              .select('username')
+              .eq('id', msg.quoted_sender_id)
+              .single()
+            
+            quotedSenderName = quotedSender?.username || null
           }
 
           return {
@@ -82,28 +128,55 @@ export function useChatMessages(conversationId: string, myUserId: string) {
             content: decryptedContent,
             media_url: msg.media_url,
             media_type: msg.media_type,
+            message_type: msg.message_type,
             reply_to_id: msg.reply_to_id,
             created_at: msg.created_at,
             updated_at: msg.updated_at,
             is_edited: msg.is_edited,
             is_deleted: msg.is_deleted,
+            status: msg.status || 'sent',
+            delivery_status: msg.delivery_status,
+            voice_duration: msg.voice_duration,
+            voice_waveform: msg.voice_waveform,
+            quoted_text: msg.quoted_text,
+            quoted_sender_id: msg.quoted_sender_id,
+            quoted_sender_name: quotedSenderName,
             sender_name: msg.sender?.username || 'Unknown',
             sender_avatar: msg.sender?.avatar_url,
-            reactions: []
+            reactions: reactionsData || []
           }
         }))
         setMessages(formattedMessages)
       }
     } catch (error) {
-      console.error('Error fetching messages:', error)
+      console.error('Error fetching messages:', JSON.stringify(error, null, 2))
     } finally {
       setIsLoading(false)
     }
   }, [conversationId, supabase])
 
+  // Mark messages as read
+  const markAsRead = useCallback(async () => {
+    if (!myUserId) return // Don't run if user ID not available yet
+    
+    try {
+      const { error } = await supabase
+        .from('messages')
+        .update({ status: 'read' })
+        .eq('conversation_id', conversationId)
+        .neq('sender_id', myUserId)
+        .neq('status', 'read')
+
+      if (error) throw error
+    } catch (error) {
+      console.error('Failed to mark messages as read:', error)
+    }
+  }, [conversationId, myUserId, supabase])
+
   // Set up real-time subscription
   useEffect(() => {
     fetchMessages()
+    markAsRead()
 
     const channel = supabase
       .channel(`chat:${conversationId}`)
@@ -130,13 +203,26 @@ export function useChatMessages(conversationId: string, myUserId: string) {
           // Try to decrypt if E2EE is enabled
           if (CryptoService.isInitialized() && newMsg.content) {
             try {
-              const parsed = JSON.parse(newMsg.content)
+              // Handle if content is already an object
+              const parsed = typeof newMsg.content === 'string' ? JSON.parse(newMsg.content) : newMsg.content
               if (parsed.content && parsed.deviceKeys) {
                 decryptedContent = await CryptoService.decryptMessage(parsed)
+                // Ensure decrypted content is a string
+                if (typeof decryptedContent !== 'string') {
+                  console.warn('Decryption returned non-string:', decryptedContent)
+                  decryptedContent = '[Encrypted message]'
+                }
               }
-            } catch {
+            } catch (error) {
               // Not encrypted or parse error, use as-is
+              console.warn('E2EE decryption failed:', error)
             }
+          }
+          
+          // Final safety check: ensure content is always a string
+          if (typeof decryptedContent !== 'string') {
+            console.error('Content is not a string:', decryptedContent)
+            decryptedContent = '[Message format error]'
           }
 
           const formattedMsg: Message = {
@@ -151,6 +237,7 @@ export function useChatMessages(conversationId: string, myUserId: string) {
             updated_at: newMsg.updated_at,
             is_edited: newMsg.is_edited,
             is_deleted: newMsg.is_deleted,
+            status: newMsg.status || 'sent',
             sender_name: sender?.username || 'Unknown',
             sender_avatar: sender?.avatar_url,
             reactions: []
@@ -164,6 +251,9 @@ export function useChatMessages(conversationId: string, myUserId: string) {
               return [...prev, formattedMsg]
             })
             
+            // Mark as read since we are in the chat
+            markAsRead()
+
             // Play notification sound (optional)
             if (typeof Audio !== 'undefined') {
               const audio = new Audio('/sounds/notification.mp3')
@@ -180,6 +270,49 @@ export function useChatMessages(conversationId: string, myUserId: string) {
               )
             )
           }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'message_reactions'
+        },
+        async (payload: any) => {
+          // Update local state directly to avoid scroll jump
+          const newReaction = payload.new
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === newReaction.message_id
+                ? { ...m, reactions: [...(m.reactions || []), newReaction] }
+                : m
+            )
+          )
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'message_reactions'
+        },
+        async (payload: any) => {
+          // Update local state directly to avoid scroll jump
+          const deletedReaction = payload.old
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === deletedReaction.message_id
+                ? {
+                    ...m,
+                    reactions: (m.reactions || []).filter(
+                      (r: any) => !(r.user_id === deletedReaction.user_id && r.emoji === deletedReaction.emoji)
+                    )
+                  }
+                : m
+            )
+          )
         }
       )
       .on(
@@ -212,6 +345,25 @@ export function useChatMessages(conversationId: string, myUserId: string) {
       )
       .subscribe()
 
+    // Real-time typing indicators subscription
+    const fetchTypingUsers = async () => {
+      if (!myUserId) return
+      
+      const { data } = await supabase
+        .from('typing_indicators')
+        .select('user_id, profiles!typing_indicators_user_id_fkey(username)')
+        .eq('conversation_id', conversationId)
+        .neq('user_id', myUserId)
+        .gt('started_at', new Date(Date.now() - 5000).toISOString()) // Last 5 seconds
+      
+      const usernames = data?.map((t: any) => t.profiles?.username).filter(Boolean) || []
+      setTypingUsers(usernames as string[])
+    }
+
+    // Poll for typing users every 1 second
+    const typingInterval = setInterval(fetchTypingUsers, 1000)
+    fetchTypingUsers()
+
     // Typing indicator subscription
     const typingChannel = supabase
       .channel(`typing:${conversationId}`)
@@ -227,12 +379,13 @@ export function useChatMessages(conversationId: string, myUserId: string) {
     return () => {
       supabase.removeChannel(channel)
       supabase.removeChannel(typingChannel)
+      clearInterval(typingInterval)
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current)
     }
   }, [conversationId, myUserId, fetchMessages, supabase])
 
   // Send message with optimistic update
-  const sendMessage = async ({ text, file, mediaUrl, mediaType, replyToId }: SendMessageParams) => {
+  const sendMessage = async ({ text, file, mediaUrl, mediaType, replyToId, quotedText, quotedSenderId, voiceDuration, voiceWaveform }: SendMessageParams) => {
     if (!text.trim() && !mediaUrl && !file) return
 
     // Generate temporary ID
@@ -241,6 +394,7 @@ export function useChatMessages(conversationId: string, myUserId: string) {
     // Create optimistic preview URL for instant display
     const optimisticMediaUrl = file ? URL.createObjectURL(file) : mediaUrl
     const optimisticMediaType = file ? file.type.split('/')[0] : mediaType
+    const messageType = file ? (file.type.startsWith('image/') ? 'image' : file.type.startsWith('audio/') ? 'audio' : 'file') : (mediaUrl ? 'image' : 'text')
 
     const optimisticMsg: Message = {
       id: tempId,
@@ -248,10 +402,16 @@ export function useChatMessages(conversationId: string, myUserId: string) {
       sender_id: myUserId,
       content: text,
       media_url: optimisticMediaUrl,
-      media_type: optimisticMediaType,
+      media_type: file ? file.type : mediaType,
+      message_type: messageType as any,
       reply_to_id: replyToId,
+      quoted_text: quotedText,
+      quoted_sender_id: quotedSenderId,
+      voice_duration: voiceDuration,
+      voice_waveform: voiceWaveform,
       created_at: new Date().toISOString(),
       is_optimistic: true,
+      status: 'sending',
       sender_name: 'You',
       reactions: []
     }
@@ -294,9 +454,10 @@ export function useChatMessages(conversationId: string, myUserId: string) {
           if (participants) {
             const encryptedPayload = await CryptoService.encryptForDevices(text, participants.user_id)
             contentToSend = JSON.stringify(encryptedPayload)
+            console.log('🔐 Message encrypted with E2EE')
           }
         } catch (encryptError) {
-          console.warn('E2EE encryption failed, sending plaintext:', encryptError)
+          console.warn('⚠️ E2EE encryption failed, sending plaintext:', encryptError)
           // Fall back to plaintext if encryption fails
         }
       }
@@ -307,10 +468,21 @@ export function useChatMessages(conversationId: string, myUserId: string) {
         content: contentToSend,
         media_url: finalMediaUrl,
         media_type: file ? file.type : mediaType,
-        reply_to_id: replyToId
+        message_type: messageType,
+        reply_to_id: replyToId,
+        voice_duration: voiceDuration,
+        voice_waveform: voiceWaveform,
+        quoted_text: quotedText,
+        quoted_sender_id: quotedSenderId,
+        status: 'sent'
       })
 
       if (error) throw error
+
+      // Update local state to 'sent'
+      setMessages((prev) => 
+        prev.map((m) => m.id === tempId ? { ...m, status: 'sent', is_optimistic: false } : m)
+      )
 
       // Clean up blob URL after successful upload
       if (file && optimisticMediaUrl) {
@@ -331,14 +503,16 @@ export function useChatMessages(conversationId: string, myUserId: string) {
   }
 
   // Send typing indicator
-  const sendTypingIndicator = useCallback(() => {
-    supabase
-      .channel(`typing:${conversationId}`)
-      .send({
-        type: 'broadcast',
-        event: 'typing',
-        payload: { userId: myUserId }
+  const sendTypingIndicator = useCallback(async () => {
+    try {
+      await supabase.from('typing_indicators').upsert({
+        conversation_id: conversationId,
+        user_id: myUserId,
+        started_at: new Date().toISOString()
       })
+    } catch (error) {
+      console.error('Failed to send typing indicator:', error)
+    }
   }, [conversationId, myUserId, supabase])
 
   // Edit message
@@ -416,67 +590,55 @@ export function useChatMessages(conversationId: string, myUserId: string) {
     }
   }
 
-  // React to message (toggle behavior)
+  // React to message (toggle behavior with optimistic UI)
   const reactToMessage = async (messageId: string, emoji: string) => {
     try {
-      // First check if this reaction already exists
-      let existingReaction: any = null
-      try {
-        const res = await supabase
-          .from('message_reactions')
-          .select('id')
-          .eq('message_id', messageId)
-          .eq('user_id', myUserId)
-          .eq('emoji', emoji)
-          .single()
-        existingReaction = res.data
-      } catch (err) {
-        // Some emojis can cause REST query parsing issues on the server (406).
-        // Fallback: fetch all reactions for this user+message and find locally.
-        console.warn('Exact emoji lookup failed, falling back to client filter', err)
-        const { data: reactionsFallback } = await supabase
-          .from('message_reactions')
-          .select('id, emoji')
-          .eq('message_id', messageId)
-          .eq('user_id', myUserId)
-        existingReaction = reactionsFallback?.find((r: any) => r.emoji === emoji)
-      }
-
-      if (existingReaction) {
-        // Reaction exists, remove it (toggle off)
-        if (existingReaction.id) {
-          const { error } = await supabase
-            .from('message_reactions')
-            .delete()
-            .eq('id', existingReaction.id)
-
-          if (error) throw error
-        } else {
-          const { error } = await supabase
-            .from('message_reactions')
-            .delete()
-            .eq('message_id', messageId)
-            .eq('user_id', myUserId)
-            .eq('emoji', emoji)
-
-          if (error) throw error
-        }
-      } else {
-        // Reaction doesn't exist, add it
-        const { error } = await supabase
-          .from('message_reactions')
-          .insert({
-            message_id: messageId,
-            user_id: myUserId,
-            emoji
-          })
-
-        if (error) throw error
-      }
+      // Optimistic UI update - show reaction immediately
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (m.id === messageId) {
+            const existingReactions = m.reactions || []
+            // Check if user already reacted with this emoji
+            const hasReacted = existingReactions.some(
+              (r: any) => r.user_id === myUserId && r.emoji === emoji
+            )
+            
+            let newReactions
+            if (hasReacted) {
+              // Remove reaction (toggle off)
+              newReactions = existingReactions.filter(
+                (r: any) => !(r.user_id === myUserId && r.emoji === emoji)
+              )
+            } else {
+              // Remove any other reaction from this user (max 1 per user)
+              const withoutUserReactions = existingReactions.filter(
+                (r: any) => r.user_id !== myUserId
+              )
+              // Add new reaction
+              newReactions = [...withoutUserReactions, { emoji, user_id: myUserId }]
+            }
+            
+            return { ...m, reactions: newReactions }
+          }
+          return m
+        })
+      )
 
       // Haptic feedback
       if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
         navigator.vibrate(20)
+      }
+
+      // Use RPC to toggle reaction in database
+      const { error } = await supabase.rpc('toggle_reaction', {
+        p_message_id: messageId,
+        p_emoji: emoji
+      })
+
+      if (error) {
+        // Revert optimistic update on error
+        await fetchMessages()
+        throw error
       }
     } catch (error) {
       console.error('React failed:', error)
@@ -487,6 +649,7 @@ export function useChatMessages(conversationId: string, myUserId: string) {
     messages,
     isLoading,
     isTyping,
+    typingUsers,
     sendMessage,
     sendTypingIndicator,
     editMessage,

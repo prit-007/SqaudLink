@@ -35,14 +35,16 @@ create table public.conversation_participants (
   primary key (conversation_id, user_id)
 );
 
+create type message_status as enum ('sending', 'sent', 'read');
+
 -- 6. MESSAGES (The core content)
 create table public.messages (
   id uuid default uuid_generate_v4() primary key,
   conversation_id uuid references public.conversations(id) on delete cascade not null,
   sender_id uuid references public.profiles(id) not null,
   
-  -- Content
-  content text, -- Text message or Caption for image
+  -- Content (Now always encrypted)
+  content jsonb, -- Stores E2EE payload: { content, iv, deviceKeys, ... }
   media_url text, -- The S3/Supabase Storage URL
   message_type message_type default 'text',
   
@@ -50,7 +52,8 @@ create table public.messages (
   reply_to_id uuid references public.messages(id), -- For threading/replies
   is_edited boolean default false,
   is_deleted boolean default false, -- "Soft delete" (WhatsApp style "This message was deleted")
-  
+  status message_status default 'sending',
+
   -- The 24-Hour Logic
   expires_at timestamp with time zone, -- NULL for text, set for images
   

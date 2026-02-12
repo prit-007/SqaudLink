@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { Inter, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
+import "./mobile.css";
+import { MaterialThemeProvider } from "@/contexts/MaterialThemeProvider";
+import { E2EEInitializer } from "@/components/E2EEInitializer";
 
 const inter = Inter({ 
   subsets: ["latin"],
@@ -16,6 +19,10 @@ const jakarta = Plus_Jakarta_Sans({
 export const metadata: Metadata = {
   title: "Squad Link - Connect with your circle",
   description: "Where conversations come alive. Chat with friends, share moments, and stay connected.",
+  icons: {
+    icon: '/icon-192.png',
+    apple: '/icon-192.png',
+  },
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
@@ -31,6 +38,7 @@ export function generateViewport() {
     maximumScale: 1,
     userScalable: false,
     themeColor: "#9333ea",
+    viewportFit: "cover",
   }
 }
 
@@ -48,7 +56,10 @@ export default function RootLayout({
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
       <body className={`${inter.variable} ${jakarta.variable} font-sans antialiased`}>
-        {children}
+        <MaterialThemeProvider>
+          <E2EEInitializer />
+          {children}
+        </MaterialThemeProvider>
       </body>
     </html>
   );

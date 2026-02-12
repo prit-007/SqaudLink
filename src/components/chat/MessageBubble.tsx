@@ -1,32 +1,36 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import { motion, useMotionValue, useTransform, AnimatePresence } from 'framer-motion'
-import ReplyPreview from './ReplyPreview'
-import Avatar from './Avatar'
-import { useTheme, themes } from '@/contexts/ThemeContext'
+import { IconButton, Avatar as MuiAvatar } from '@mui/material'
+import ReplyIcon from '@mui/icons-material/Reply'
+import PlayArrowIcon from '@mui/icons-material/PlayArrow'
+import PauseIcon from '@mui/icons-material/Pause'
+import AddReactionOutlinedIcon from '@mui/icons-material/AddReactionOutlined'
+import MessageStatus from './MessageStatus'
+import EmojiPicker from './EmojiPicker'
+import MessageContextMenu from './MessageContextMenu'
 
 interface MessageBubbleProps {
   text?: string
   sender: 'me' | 'them'
   time: string
-  type?: 'text' | 'image'
+  type?: 'text' | 'image' | 'voice' | 'video' | 'file'
   imageUrl?: string
-  reactions?: string[]
-  isExpiring?: boolean
-  expiresIn?: string
-  isRead?: boolean
+  reactions?: any[]
+  status?: 'sending' | 'sent' | 'read'
   isEdited?: boolean
   onReact?: (emoji: string) => void
   onReply?: () => void
   onEdit?: () => void
   onDelete?: () => void
-  replyTo?: { sender: string; text?: string; imageUrl?: string }
+  replyTo?: { id?: string; sender: string; text?: string; imageUrl?: string }
+  onReplyClick?: () => void
   position?: 'single' | 'first' | 'middle' | 'last'
   senderName?: string
-  isGroup?: boolean
-  avatarColor?: string
   showAvatar?: boolean
+  voiceDuration?: number
+  voiceWaveform?: number[]
 }
 
 export default function MessageBubble({
@@ -36,253 +40,273 @@ export default function MessageBubble({
   type = 'text',
   imageUrl,
   reactions,
-  isExpiring,
-  expiresIn,
-  isRead = true,
+  status = 'read',
   isEdited = false,
   onReact,
   onReply,
   onEdit,
   onDelete,
   replyTo,
+  onReplyClick,
   position = 'single',
   senderName,
-  isGroup = false,
-  avatarColor = 'text-purple-400',
-  showAvatar = false
+  showAvatar = false,
+  voiceDuration,
+  voiceWaveform
 }: MessageBubbleProps) {
   const isMe = sender === 'me'
-  const [isLongPress, setIsLongPress] = useState(false)
-  const [showActions, setShowActions] = useState(false)
-  const { theme } = useTheme()
-  const currentTheme = themes[theme]
+  const messageRef = useRef<HTMLDivElement>(null)
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [contextMenuAnchor, setContextMenuAnchor] = useState<HTMLElement | null>(null)
+  const [emojiPickerAnchor, setEmojiPickerAnchor] = useState<HTMLElement | null>(null)
 
-  // 🎨 DYNAMIC BORDER RADIUS - Finetuned for "Organic" feel
-  const getBorderRadius = () => {
-    const rLg = 'rounded-[20px]' // Slightly tighter than 3xl for cleaner stacking
-    const rSm = 'rounded-[4px]'
-
+  // Dynamic border radius for "Chat Cluster" effect
+  const borderRadiusClass = () => {
+    const base = "rounded-2xl" // 16px
+    const sharp = "rounded-sm" // 4px
+    
     if (isMe) {
-      switch (position) {
-        case 'first': return `${rLg} rounded-br-${rSm}`
-        case 'middle': return `${rLg} rounded-tr-${rSm} rounded-br-${rSm}`
-        case 'last': return `${rLg} rounded-tr-${rSm}`
-        default: return `${rLg} rounded-br-sm`
-      }
+      if (position === 'first') return `${base} rounded-tr-${sharp}`
+      if (position === 'middle') return `${base} rounded-tr-${sharp} rounded-br-${sharp}`
+      if (position === 'last') return `${base} rounded-br-${sharp}`
     } else {
-      switch (position) {
-        case 'first': return `${rLg} rounded-bl-${rSm}`
-        case 'middle': return `${rLg} rounded-tl-${rSm} rounded-bl-${rSm}`
-        case 'last': return `${rLg} rounded-tl-${rSm}`
-        default: return `${rLg} rounded-bl-sm`
-      }
+      if (position === 'first') return `${base} rounded-tl-${sharp}`
+      if (position === 'middle') return `${base} rounded-tl-${sharp} rounded-bl-${sharp}`
+      if (position === 'last') return `${base} rounded-bl-${sharp}`
     }
+    return base
   }
 
-  // 🏎️ SWIPE PHYSICS
+  // Swipe physics
   const x = useMotionValue(0)
-  const iconOpacity = useTransform(x, [0, 60], [0, 1])
-  const iconScale = useTransform(x, [0, 80], [0.5, 1.1])
-  const iconX = useTransform(x, [0, 80], [0, 10]) // Parallax effect on icon
+  const iconOpacity = useTransform(x, isMe ? [-60, 0] : [0, 60], [1, 0])
+  const iconScale = useTransform(x, isMe ? [-60, 0] : [0, 60], [1.2, 0.8])
 
   const handleDragEnd = (_: any, info: any) => {
-    if (Math.abs(info.offset.x) > 80) {
-      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate(30)
+    if (Math.abs(info.offset.x) > 60) {
+      if (navigator.vibrate) navigator.vibrate(20)
       onReply?.()
+    }
+    x.set(0)
+  }
+
+  const togglePlay = () => {
+    if (audioRef.current) {
+      isPlaying ? audioRef.current.pause() : audioRef.current.play()
+      setIsPlaying(!isPlaying)
     }
   }
 
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }
+
+  // Group reactions
+  const groupedReactions = reactions?.reduce((acc: any, r: any) => {
+    const existing = acc.find((item: any) => item.emoji === r.emoji)
+    existing ? existing.count++ : acc.push({ emoji: r.emoji, count: 1 })
+    return acc
+  }, [])
+
   return (
-    <div className={`relative w-full ${position === 'last' || position === 'single' ? 'mb-4' : 'mb-[2px]'}`}>
-      <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} gap-2 group relative`}>
-        
-        {/* Avatar on the left for 'them' messages */}
-        {!isMe && (
-          <div className="w-8 h-8 flex-shrink-0 mt-auto">
-            {showAvatar ? (
-              <Avatar 
-                src={`https://api.dicebear.com/9.x/initials/svg?seed=${senderName || 'User'}`}
-                alt={senderName || 'User'}
-                size="sm"
-              />
-            ) : (
-              <div className="w-8 h-8" />
-            )}
-          </div>
-        )}
+    <div className={`relative w-full group flex ${isMe ? 'justify-end' : 'justify-start'} ${position === 'last' || position === 'single' ? 'mb-4' : 'mb-1'}`}>
+      
+      {/* Avatar Gutter */}
+      {!isMe && (
+        <div className="w-8 mr-2 flex-shrink-0 flex items-end">
+          {showAvatar && (
+            <MuiAvatar 
+              src={`https://api.dicebear.com/9.x/initials/svg?seed=${senderName || 'User'}`}
+              sx={{ width: 32, height: 32, bgcolor: 'primary.main', fontSize: 14 }}
+            >
+              {senderName?.[0]}
+            </MuiAvatar>
+          )}
+        </div>
+      )}
 
-      <div className="flex flex-col relative">
-        
-        {/* SWIPE REPLY ICONS (Background Layer) */}
-        {onReply && (
-          <div className={`absolute top-1/2 -translate-y-1/2 z-0 flex items-center pointer-events-none ${isMe ? 'right-0 pr-4' : 'left-0 pl-4'}`}>
-             <motion.div 
-               style={{ opacity: iconOpacity, scale: iconScale, x: iconX }}
-               className="w-8 h-8 bg-zinc-800 rounded-full flex items-center justify-center border border-white/10 shadow-xl"
-             >
-               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={isMe ? "text-purple-400" : "text-teal-400"}>
-                  <path d={isMe ? "M15 11l6 6v-6h-6zm0 0l-6-6" : "M9 11l-6 6v-6h6zm0 0l6-6"} />
-               </svg>
-             </motion.div>
-          </div>
-        )}
+      <div className="relative max-w-[85%] sm:max-w-[70%] md:max-w-[600px]">
+        {/* Swipe Reply Indicator */}
+        <div className={`absolute top-1/2 -translate-y-1/2 z-0 flex items-center ${isMe ? '-left-12' : '-right-12'}`}>
+          <motion.div style={{ opacity: iconOpacity, scale: iconScale }}>
+            <div className="bg-white/10 p-1.5 rounded-full shadow-sm backdrop-blur-sm">
+              <ReplyIcon className="text-white text-opacity-80" sx={{ fontSize: 16 }} />
+            </div>
+          </motion.div>
+        </div>
 
-        {/* Sender Name (Groups) - Show above first message */}
+        {/* Sender Name (First message in group only) */}
         {!isMe && (position === 'first' || position === 'single') && (
-          <span className={`block text-[11px] font-bold mb-1 opacity-90 ${currentTheme.text}`}>
+          <span className="text-[11px] font-semibold text-zinc-400 ml-1 mb-1 block">
             {senderName}
           </span>
         )}
 
-        {/* DRAGGABLE CONTENT LAYER */}
+        {/* Draggable Container */}
         <motion.div
+          ref={messageRef}
           drag="x"
-          dragConstraints={{ left: isMe ? -100 : 0, right: isMe ? 0 : 100 }}
-          dragElastic={0.15}
+          dragConstraints={{ left: 0, right: 0 }}
+          dragElastic={0.1}
           onDragEnd={handleDragEnd}
           style={{ x }}
-          onDoubleClick={() => {
-             if (typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate(20)
-             onReact?.('❤️')
-          }}
-          className={`relative z-10 flex ${isMe ? 'justify-end' : 'justify-start'} max-w-full`}
+          onDoubleClick={() => onReact?.('❤️')}
+          onContextMenu={(e) => { e.preventDefault(); setContextMenuAnchor(messageRef.current); }}
+          className="relative z-10"
         >
-          <div className={`
-             relative flex flex-col ${isMe ? 'items-end' : 'items-start'}
-             max-w-[85%] sm:max-w-[75%] md:max-w-[65%]
-          `}>
-            
-            {/* THE BUBBLE */}
-            <div 
-              className={`
-                relative overflow-hidden transition-all duration-200
-                ${getBorderRadius()}
-                ${type === 'image' ? 'p-1' : 'px-4 py-2.5'}
-                ${isMe 
-                  ? `bg-gradient-to-tr ${currentTheme.primary} shadow-[0_4px_15px_-3px_${currentTheme.glow}]` 
-                  : 'bg-zinc-800/80 backdrop-blur-md shadow-sm border border-white/5'}
-                
-                /* Subtle glass ring highlight */
-                ring-1 ring-white/10
-              `}
-            >
-              {/* Reply Context (Inside Bubble) */}
-              {replyTo && (
-                <div 
-                  className={`
-                    mb-2 rounded-lg p-2 text-xs flex gap-2 items-center overflow-hidden
-                    ${isMe ? 'bg-black/20 text-purple-100' : 'bg-black/20 text-zinc-300'}
-                    border-l-2 ${isMe ? 'border-purple-300' : 'border-teal-400'}
-                  `}
-                >
-                   {replyTo.imageUrl && <img src={replyTo.imageUrl} className="w-8 h-8 rounded bg-black/20 object-cover" />}
-                   <div className="flex-1 min-w-0">
-                      <p className="font-bold opacity-90 truncate">{replyTo.sender}</p>
-                      <p className="opacity-70 truncate">{replyTo.text || 'Photo'}</p>
-                   </div>
-                </div>
-              )}
-
-              {/* Text Content */}
-              {type === 'text' && (
-                <p className={`
-                  text-[15px] leading-relaxed break-words whitespace-pre-wrap
-                  ${isMe ? 'text-white font-normal tracking-wide' : 'text-zinc-100 font-light'}
-                `}>
-                  {text}
-                </p>
-              )}
-              
-              {/* Image Content */}
-              {type === 'image' && imageUrl && (
-                <div className="relative">
-                  <img 
-                    src={imageUrl} 
-                    alt="Media" 
-                    className={`w-full max-h-[400px] object-cover ${getBorderRadius()}`} 
-                    loading="lazy"
-                  />
-                  {/* Glass Gradient Overlay for Image Text */}
-                  {text && (
-                     <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 pt-10 rounded-b-[20px]">
-                        <p className="text-white text-sm">{text}</p>
-                     </div>
-                  )}
-                </div>
-              )}
-
-              {/* Meta Data (Time + Ticks + Edited Indicator) */}
-              {(position === 'last' || position === 'single') && (
-                <div className={`
-                  flex items-center gap-1 mt-1 text-[10px] font-medium
-                  ${isMe ? 'justify-end text-purple-100/70' : 'text-zinc-500'}
-                  ${type === 'image' && !text ? 'absolute bottom-3 right-3 px-2 py-1 bg-black/40 backdrop-blur-md rounded-full text-white/90' : ''}
-                `}>
-                  {isEdited && <span className="opacity-60 italic mr-1">edited</span>}
-                  <span>{time}</span>
-                  {isMe && isRead && (
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="text-blue-300">
-                      <path d="M20 6L9 17l-5-5" />
-                    </svg>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* FLOATING REACTIONS PILL */}
-            <AnimatePresence>
-              {reactions && reactions.length > 0 && (
-                <motion.div 
-                  initial={{ scale: 0, y: 10 }}
-                  animate={{ scale: 1, y: 0 }}
-                  className={`
-                    absolute -bottom-3 ${isMe ? 'left-0' : 'right-0'} z-20
-                    flex items-center gap-0.5 px-1.5 py-0.5
-                    bg-zinc-900/90 backdrop-blur-xl border border-white/10 rounded-full shadow-lg
-                  `}
-                >
-                  {reactions.map((r, i) => (
-                    <span key={i} className="text-xs hover:scale-125 transition-transform cursor-default">{r}</span>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* DESKTOP HOVER ACTIONS */}
-            <div className={`
-              hidden md:flex opacity-0 group-hover:opacity-100 transition-opacity duration-200
-              absolute top-0 ${isMe ? '-left-12' : '-right-12'} h-full items-center
-            `}>
-              <div className="flex gap-1 bg-zinc-900/90 backdrop-blur-md border border-white/10 rounded-full px-2 py-1 shadow-xl transform scale-90 hover:scale-100 transition-transform">
-                {['❤️', '😂', '👍'].map((emoji) => (
-                  <button
-                    key={emoji}
-                    onClick={() => onReact?.(emoji)}
-                    className="hover:scale-125 transition-transform px-1"
-                  >
-                    {emoji}
-                  </button>
-                ))}
-                <button className="px-1 text-zinc-400 hover:text-white" onClick={() => onReply?.()}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
-                </button>
-                {onEdit && isMe && (
-                  <button className="px-1 text-zinc-400 hover:text-blue-400" onClick={() => onEdit()}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                  </button>
+          <div 
+            className={`
+              relative overflow-hidden shadow-sm transition-all
+              ${borderRadiusClass()}
+              ${isMe 
+                ? 'bg-gradient-to-br from-indigo-600 to-indigo-700 text-white shadow-indigo-500/20' 
+                : 'bg-zinc-800/80 backdrop-blur-md border border-white/5 text-zinc-100'
+              }
+            `}
+          >
+            {/* Reply Context */}
+            {replyTo && (
+              <div 
+                onClick={onReplyClick}
+                className={`
+                  m-1 mb-1 p-2 rounded-xl flex gap-3 cursor-pointer transition-colors
+                  ${isMe ? 'bg-black/20 hover:bg-black/30' : 'bg-white/5 hover:bg-white/10'}
+                  border-l-[3px] ${isMe ? 'border-white/50' : 'border-indigo-500'}
+                `}
+              >
+                {replyTo.imageUrl && (
+                  <img src={replyTo.imageUrl} alt="" className="w-10 h-10 rounded-lg object-cover" />
                 )}
-                {onDelete && isMe && (
-                  <button className="px-1 text-zinc-400 hover:text-red-400" onClick={() => onDelete()}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                  </button>
+                <div className="flex-1 min-w-0 overflow-hidden">
+                  <p className="text-[11px] font-bold opacity-90 truncate">{replyTo.sender}</p>
+                  <p className="text-[11px] opacity-75 truncate">{replyTo.text || 'Photo'}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Media Content */}
+            {imageUrl && type === 'image' && (
+              <div className="relative">
+                <img src={imageUrl} alt="Attachment" className="w-full h-auto max-h-[400px] object-cover" />
+                {/* Gradient Overlay for text on image */}
+                {text && <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />}
+              </div>
+            )}
+
+            {/* Text Content */}
+            {(text || type === 'voice') && (
+              <div className={`
+                px-3 py-2
+                ${type === 'image' && text ? 'pt-2 pb-6 absolute bottom-0 left-0 right-0' : ''}
+              `}>
+                
+                {/* Voice Player */}
+                {type === 'voice' && (
+                  <div className="flex items-center gap-3 py-1">
+                    <button 
+                      onClick={togglePlay}
+                      className={`p-2 rounded-full transition-colors ${isMe ? 'bg-white/20 hover:bg-white/30' : 'bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-400'}`}
+                    >
+                      {isPlaying ? <PauseIcon fontSize="small" /> : <PlayArrowIcon fontSize="small" />}
+                    </button>
+                    <div className="flex-1 flex items-center gap-0.5 h-6">
+                      {(voiceWaveform || Array.from({length: 24})).map((val: any, i) => (
+                        <div 
+                          key={i} 
+                          className={`w-1 rounded-full ${isMe ? 'bg-white/70' : 'bg-indigo-400/50'}`}
+                          style={{ height: `${Math.max(20, typeof val === 'number' ? val : Math.random() * 100)}%` }} 
+                        />
+                      ))}
+                    </div>
+                    <span className="text-[10px] font-mono opacity-80">{formatDuration(voiceDuration || 0)}</span>
+                    <audio ref={audioRef} src={imageUrl} onEnded={() => setIsPlaying(false)} className="hidden" />
+                  </div>
+                )}
+
+                {/* Actual Text */}
+                {type !== 'voice' && (
+                  <p className="whitespace-pre-wrap text-[15px] leading-relaxed break-words">
+                    {text}
+                  </p>
                 )}
               </div>
-            </div>
+            )}
 
+            {/* Metadata Footer */}
+            <div className={`
+              flex items-center justify-end gap-1 px-3 pb-2 pt-0
+              ${type === 'image' && !text ? 'absolute bottom-0 right-0 p-2 bg-black/40 rounded-tl-xl backdrop-blur-sm' : ''}
+            `}>
+              {isEdited && <span className="text-[9px] opacity-60 italic">edited</span>}
+              <span className="text-[10px] opacity-60 min-w-[30px] text-right">{time}</span>
+              {isMe && <MessageStatus status={status} />}
+            </div>
           </div>
         </motion.div>
+
+        {/* Hover Actions (Desktop) */}
+        <div className={`
+          absolute top-0 hidden md:group-hover:flex items-center gap-1 p-1
+          bg-zinc-800/90 backdrop-blur border border-white/10 rounded-full shadow-xl
+          transition-all duration-200 z-20
+          ${isMe ? '-left-24' : '-right-24'}
+        `}>
+          {['❤️', '😂', '👍'].map((emoji) => (
+            <button key={emoji} onClick={() => onReact?.(emoji)} className="p-1 hover:scale-125 transition-transform">
+              {emoji}
+            </button>
+          ))}
+          <div className="w-[1px] h-4 bg-white/10 mx-1" />
+          <button onClick={() => setEmojiPickerAnchor(messageRef.current)} className="p-1 text-zinc-400 hover:text-white">
+            <AddReactionOutlinedIcon sx={{ fontSize: 16 }} />
+          </button>
+        </div>
+
+        {/* Reactions Pills */}
+        <AnimatePresence>
+          {groupedReactions.length > 0 && (
+            <div className={`flex flex-wrap gap-1 mt-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
+              {groupedReactions.map((r: any, i: number) => (
+                <motion.button
+                  key={i}
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  onClick={() => onReact?.(r.emoji)}
+                  className="
+                    flex items-center gap-1 px-2 py-0.5 rounded-full 
+                    bg-zinc-800/80 border border-white/5 shadow-sm 
+                    text-xs hover:bg-zinc-700 transition-colors
+                  "
+                >
+                  <span>{r.emoji}</span>
+                  {r.count > 1 && <span className="font-bold text-indigo-400">{r.count}</span>}
+                </motion.button>
+              ))}
+            </div>
+          )}
+        </AnimatePresence>
       </div>
-      </div>
+
+      <MessageContextMenu
+        anchorEl={contextMenuAnchor}
+        open={Boolean(contextMenuAnchor)}
+        onClose={() => setContextMenuAnchor(null)}
+        isOwnMessage={isMe}
+        onReply={onReply}
+        onReact={() => setEmojiPickerAnchor(messageRef.current)}
+        onEdit={onEdit}
+        onDelete={onDelete}
+      />
+
+      <EmojiPicker
+        anchorEl={emojiPickerAnchor}
+        open={Boolean(emojiPickerAnchor)}
+        onClose={() => setEmojiPickerAnchor(null)}
+        onSelect={(emoji) => onReact?.(emoji)}
+      />
     </div>
   )
 }

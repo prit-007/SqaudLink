@@ -1,6 +1,19 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { 
+  Reply, 
+  ContentCopy, 
+  Delete, 
+  Edit, 
+  Forward, 
+  SaveAlt, 
+  Share, 
+  Favorite,
+  InfoOutlined,
+  MoreHoriz
+} from '@mui/icons-material'
 
 interface MessageActionsProps {
   messageId: number | string
@@ -14,6 +27,7 @@ interface MessageActionsProps {
   onDelete?: () => void
   onEdit?: () => void
   onReact?: (emoji: string) => void
+  onInfo?: () => void
   children: React.ReactNode
 }
 
@@ -29,208 +43,193 @@ export default function MessageActions({
   onDelete,
   onEdit,
   onReact,
+  onInfo,
   children
 }: MessageActionsProps) {
   const [showMenu, setShowMenu] = useState(false)
-  const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 })
-  const [longPressTimer, setLongPressTimer] = useState<NodeJS.Timeout | null>(null)
-  const [touchStartPos, setTouchStartPos] = useState({ x: 0, y: 0 })
+  const [coords, setCoords] = useState({ x: 0, y: 0 })
   const containerRef = useRef<HTMLDivElement>(null)
-  const [lastTap, setLastTap] = useState(0)
+  
+  // Gesture State
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null)
+  const touchStart = useRef<{ x: number, y: number } | null>(null)
+  const lastTap = useRef<number>(0)
 
-  // Touch gesture handlers
+  // --- Handlers ---
+
+  // 1. Right Click (Desktop)
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    triggerMenu(e.clientX, e.clientY)
+  }
+
+  // 2. Touch Handlers (Mobile Long Press)
   const handleTouchStart = (e: React.TouchEvent) => {
-    const touch = e.touches[0]
-    setTouchStartPos({ x: touch.clientX, y: touch.clientY })
+    touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
     
-    const timer = setTimeout(() => {
-      setMenuPosition({ x: touch.clientX, y: touch.clientY })
-      setShowMenu(true)
-      // Haptic feedback on supported devices
-      if ('vibrate' in navigator) {
-        navigator.vibrate(50)
-      }
-    }, 400) // Long press = 400ms
-
-    setLongPressTimer(timer)
+    longPressTimer.current = setTimeout(() => {
+      triggerMenu(e.touches[0].clientX, e.touches[0].clientY)
+    }, 500) // 500ms long press
   }
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    // Cancel long press if finger moves too much
-    const touch = e.touches[0]
-    const deltaX = Math.abs(touch.clientX - touchStartPos.x)
-    const deltaY = Math.abs(touch.clientY - touchStartPos.y)
+    if (!touchStart.current) return
+    const moveX = Math.abs(e.touches[0].clientX - touchStart.current.x)
+    const moveY = Math.abs(e.touches[0].clientY - touchStart.current.y)
     
-    if (deltaX > 10 || deltaY > 10) {
-      if (longPressTimer) {
-        clearTimeout(longPressTimer)
-        setLongPressTimer(null)
+    // Cancel if moved more than 10px
+    if (moveX > 10 || moveY > 10) {
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current)
+        longPressTimer.current = null
       }
     }
   }
 
   const handleTouchEnd = () => {
-    if (longPressTimer) {
-      clearTimeout(longPressTimer)
-      setLongPressTimer(null)
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current)
+      longPressTimer.current = null
     }
   }
 
-  // Mouse handlers for desktop
-  const handleContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault()
-    setMenuPosition({ x: e.clientX, y: e.clientY })
+  // 3. Double Tap (Quick React)
+  const handleDoubleClick = (e: React.MouseEvent | React.TouchEvent) => {
+    const now = Date.now()
+    if (now - lastTap.current < 300) {
+      // Double tap detected
+      e.preventDefault()
+      e.stopPropagation()
+      if (onReact) {
+        triggerHaptic('light')
+        onReact('❤️')
+      }
+    }
+    lastTap.current = now
+  }
+
+  // --- Helpers ---
+
+  const triggerMenu = (x: number, y: number) => {
+    triggerHaptic('medium')
+    setCoords({ x, y })
     setShowMenu(true)
   }
 
-  // Double tap for quick reaction
-  const handleTap = (e: React.TouchEvent | React.MouseEvent) => {
-    const now = Date.now()
-    const timeDiff = now - lastTap
+  const triggerHaptic = (type: 'light' | 'medium' | 'heavy') => {
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      switch (type) {
+        case 'light': navigator.vibrate(20); break;
+        case 'medium': navigator.vibrate(50); break;
+        case 'heavy': navigator.vibrate([30, 50, 30]); break;
+      }
+    }
+  }
+
+  // --- Sub-components ---
+
+  const ActionItem = ({ icon: Icon, label, onClick, danger = false, separator = false }: any) => {
+    if (separator) return <div className="h-[1px] bg-white/10 my-1 mx-2" />
     
-    if (timeDiff < 300 && timeDiff > 0) {
-      // Double tap detected - quick heart reaction
-      e.preventDefault()
-      if ('vibrate' in navigator) {
-        navigator.vibrate([30, 50, 30])
-      }
-      onReact?.('❤️')
-    }
-    setLastTap(now)
-  }
+    if (!onClick) return null
 
-  // Close menu when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (showMenu && containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setShowMenu(false)
-      }
-    }
-
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [showMenu])
-
-  const actions = [
-    { icon: '↩️', label: 'Reply', onClick: onReply, show: true },
-    { icon: '➡️', label: 'Forward', onClick: onForward, show: true },
-    { icon: '📋', label: 'Copy', onClick: () => handleCopy(), show: !!text },
-    { icon: '💾', label: 'Save', onClick: onSave, show: true },
-    { icon: '🔗', label: 'Share', onClick: () => handleShare(), show: true },
-    { icon: imageUrl ? '⬇️' : null, label: 'Download', onClick: () => handleDownload(), show: !!imageUrl },
-    { icon: sender === 'me' ? '🗑️' : null, label: 'Delete', onClick: onDelete, show: sender === 'me' },
-  ].filter(action => action.show && action.icon)
-
-  const handleCopy = async () => {
-    if (text) {
-      try {
-        await navigator.clipboard.writeText(text)
-        // Show toast notification
-        setShowMenu(false)
-      } catch (err) {
-        console.error('Failed to copy:', err)
-      }
-    }
-  }
-
-  const handleShare = async () => {
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          text: text,
-          url: imageUrl,
-        })
-      } catch (err) {
-        console.error('Share failed:', err)
-      }
-    }
-    setShowMenu(false)
-  }
-
-  const handleDownload = async () => {
-    if (imageUrl) {
-      try {
-        const response = await fetch(imageUrl)
-        const blob = await response.blob()
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `squad-link-${messageId}.jpg`
-        a.click()
-        window.URL.revokeObjectURL(url)
-      } catch (err) {
-        console.error('Download failed:', err)
-      }
-    }
-    setShowMenu(false)
+    return (
+      <button
+        onClick={(e) => { 
+          e.stopPropagation(); 
+          onClick(); 
+          setShowMenu(false); 
+        }}
+        className={`
+          w-full flex items-center gap-3 px-3 py-2.5 text-sm transition-all text-left rounded-lg
+          ${danger 
+            ? 'text-red-400 hover:bg-red-500/10 active:bg-red-500/20' 
+            : 'text-zinc-200 hover:bg-white/10 active:bg-white/20 hover:text-white'
+          }
+        `}
+      >
+        <Icon sx={{ fontSize: 18, opacity: 0.8 }} />
+        <span className="font-medium">{label}</span>
+      </button>
+    )
   }
 
   return (
-    <div
+    <div 
       ref={containerRef}
       onContextMenu={handleContextMenu}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
-      onDoubleClick={(e) => handleTap(e)}
-      className="relative select-none"
-      style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none' }}
+      onClick={handleDoubleClick}
+      className="relative touch-manipulation select-none"
     >
       {children}
 
-      {/* Action Menu */}
-      {showMenu && (
-        <>
-          {/* Backdrop */}
-          <div 
-            className="fixed inset-0 z-[100] bg-black/30 backdrop-blur-sm animate-in fade-in duration-150"
-            onClick={() => setShowMenu(false)}
-            onTouchStart={() => setShowMenu(false)}
-          />
-          
-          {/* Menu */}
-          <div
-            className="fixed z-[101] bg-zinc-900/98 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 slide-in-from-bottom-2 duration-200"
-            style={{
-              left: Math.max(16, Math.min(menuPosition.x - 140, window.innerWidth - 296)),
-              top: Math.max(80, Math.min(menuPosition.y - 80, window.innerHeight - 180)),
-            }}
-          >
-            {/* Quick Reactions - Mobile friendly */}
-            <div className="flex items-center justify-center gap-2 px-4 py-3 border-b border-white/5">
-              {['❤️', '👍', '😂', '😮', '😢', '🔥'].map((emoji) => (
-                <button
-                  key={emoji}
-                  onClick={() => {
-                    onReact?.(emoji)
-                    setShowMenu(false)
-                  }}
-                  className="text-2xl p-2 hover:scale-125 active:scale-110 transition-transform touch-manipulation"
-                >
-                  {emoji}
-                </button>
-              ))}
-            </div>
+      <AnimatePresence>
+        {showMenu && (
+          <>
+            {/* 1. Backdrop (Blur & Click to Close) */}
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 bg-black/20 backdrop-blur-[2px]" 
+              onClick={(e) => { e.stopPropagation(); setShowMenu(false); }} 
+            />
+            
+            {/* 2. Glass Popover Menu */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.8, y: 10 }}
+              transition={{ type: "spring", damping: 20, stiffness: 300 }}
+              className="fixed z-50 min-w-[220px] bg-zinc-900/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden py-1.5 origin-top-left"
+              style={{ 
+                // Smart positioning: flip if too close to right/bottom edges
+                left: Math.min(coords.x, typeof window !== 'undefined' ? window.innerWidth - 230 : 0), 
+                top: Math.min(coords.y, typeof window !== 'undefined' ? window.innerHeight - 350 : 0) 
+              }}
+            >
+              {/* Quick Reactions Bar */}
+              <div className="flex justify-between px-2 py-2 mb-1 border-b border-white/5 mx-1">
+                {['❤️', '😂', '👍', '🔥', '😮', '😢'].map((emoji) => (
+                  <button 
+                    key={emoji}
+                    onClick={(e) => { 
+                      e.stopPropagation(); 
+                      triggerHaptic('light'); 
+                      onReact?.(emoji); 
+                      setShowMenu(false); 
+                    }}
+                    className="text-xl hover:scale-125 active:scale-95 transition-transform p-1 cursor-pointer"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
 
-            {/* Action Buttons */}
-            <div className="grid grid-cols-4 gap-1 p-2 min-w-[280px]">
-              {actions.map((action, index) => (
-                <button
-                  key={index}
-                  onClick={() => {
-                    action.onClick?.()
-                    setShowMenu(false)
-                  }}
-                  className="flex flex-col items-center gap-1.5 p-3 rounded-2xl hover:bg-white/10 active:bg-white/20 active:scale-95 transition-all touch-manipulation"
-                >
-                  <span className="text-2xl leading-none">{action.icon}</span>
-                  <span className="text-[10px] text-zinc-400 leading-tight">{action.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </>
-      )}
+              {/* Action List */}
+              <div className="px-1">
+                <ActionItem icon={Reply} label="Reply" onClick={onReply} />
+                
+                {text && <ActionItem icon={ContentCopy} label="Copy Text" onClick={onCopy} />}
+                {imageUrl && <ActionItem icon={SaveAlt} label="Save Image" onClick={onSave} />}
+                {onForward && <ActionItem icon={Forward} label="Forward" onClick={onForward} />}
+                
+                {(onCopy || onSave || onForward) && <ActionItem separator />}
+                
+                {sender === 'me' && onEdit && <ActionItem icon={Edit} label="Edit" onClick={onEdit} />}
+                {onInfo && <ActionItem icon={InfoOutlined} label="Info" onClick={onInfo} />}
+                
+                <ActionItem separator />
+                {sender === 'me' && onDelete && <ActionItem icon={Delete} label="Delete" onClick={onDelete} danger />}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

@@ -4,14 +4,20 @@ import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
+import { Box, Paper, IconButton, Typography, Divider } from '@mui/material'
+import PhoneIcon from '@mui/icons-material/Phone'
+import MoreVertIcon from '@mui/icons-material/MoreVert'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { createClient } from '@/utils/supabase/client'
 import { useChatMessages } from '@/hooks/useChatMessages'
+import { useMessageReads } from '@/hooks/useMessageReads'
 import Avatar from '@/components/chat/Avatar'
 import MessageBubble from '@/components/chat/MessageBubble'
 import MessageActions from '@/components/chat/MessageActions'
 import ChatInput from '@/components/chat/ChatInput'
 import TypingIndicator from '@/components/chat/TypingIndicator'
 import ThemeSelector from '@/components/chat/ThemeSelector'
+import SquiggleLoader from '@/components/chat/SquiggleLoader'
 
 export default function ChatWindow() {
   const params = useParams()
@@ -54,6 +60,7 @@ export default function ChatWindow() {
     messages, 
     isLoading, 
     isTyping, 
+    typingUsers,
     sendMessage, 
     sendTypingIndicator, 
     editMessage,
@@ -62,17 +69,43 @@ export default function ChatWindow() {
     scrollRef 
   } = useChatMessages(conversationId, myUserId)
   
+  // Use message reads hook
+  useMessageReads(conversationId, myUserId, messages)
+  
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [editContent, setEditContent] = useState('')
   
   const [newMessage, setNewMessage] = useState('')
-  const [replyingTo, setReplyingTo] = useState<{ id: string; sender: string; text?: string; imageUrl?: string } | null>(null)
+  const [replyingTo, setReplyingTo] = useState<{ id: string; sender: string; senderId?: string; text?: string; imageUrl?: string } | null>(null)
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const messageRefs = useRef<{ [key: string]: HTMLDivElement | null }>({})
+  
+  // Scroll to a specific message
+  const scrollToMessage = (messageId: string) => {
+    const messageElement = messageRefs.current[messageId]
+    if (messageElement) {
+      messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      // Highlight effect
+      messageElement.style.transition = 'all 0.3s ease'
+      messageElement.style.transform = 'scale(1.02)'
+      setTimeout(() => {
+        messageElement.style.transform = 'scale(1)'
+      }, 300)
+    }
+  }
   
   // Check if this is a group chat
   const isGroupChat = conversation?.type === 'group' || false
-  const [isOnline] = useState(true) // TODO: Implement real presence
+  
+  // Get online status from participant
+  const getOnlineStatus = () => {
+    if (isGroupChat) return false
+    const otherParticipant = conversation?.participants?.find((p: any) => p.user_id !== myUserId)
+    return otherParticipant?.status === 'online' || false
+  }
+  
+  const [isOnline] = useState(getOnlineStatus())
 
   const getConversationName = () => {
     if (!conversation) return 'Loading...'
@@ -90,22 +123,31 @@ export default function ChatWindow() {
     return colors[index]
   }
 
-  // Auto-scroll on new messages
+  // Auto-scroll on new messages (but not on reactions)
+  const prevMessagesLength = useRef(messages.length)
   useEffect(() => {
-    if (!isLoading && messages.length > 0) {
+    if (!isLoading && messages.length > prevMessagesLength.current) {
       setTimeout(() => {
         scrollRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
       }, 100)
     }
+    prevMessagesLength.current = messages.length
   }, [messages, isLoading, scrollRef])
   
   const handleSendMessage = async (content: string, file?: File) => {
     if (content.trim() === '' && !file) return
     
-    await sendMessage({ text: content, file: file, replyToId: replyingTo?.id })
-    
+    // Clear immediately for better UX (WhatsApp-like)
     setNewMessage('')
     setReplyingTo(null)
+    
+    await sendMessage({ 
+      text: content, 
+      file: file, 
+      replyToId: replyingTo?.id,
+      quotedText: replyingTo?.text,
+      quotedSenderId: replyingTo?.senderId
+    })
   }
   
   const handleTyping = (value: string) => {
@@ -204,46 +246,91 @@ export default function ChatWindow() {
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-zinc-900 h-screen">
-      {/* Chat Header */}
-      <header className="flex items-center p-3 border-b border-white/10 bg-zinc-900/70 backdrop-blur-md z-20">
-        <Link href="/chat" className="md:hidden mr-3 p-2 rounded-full hover:bg-white/10">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M15 18l-6-6 6-6" />
-          </svg>
+    <Box 
+      sx={{ 
+        display: 'flex', 
+        flexDirection: 'column', 
+        height: '100vh',
+        width: '100%',
+        bgcolor: 'background.default',
+        overflow: 'hidden'
+      }}
+    >
+      {/* Chat Header - Material Design 3 */}
+      <Paper 
+        elevation={2}
+        sx={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          p: 2,
+          borderRadius: 0,
+          bgcolor: 'surfaceContainer.main',
+          borderBottom: 1,
+          borderColor: 'divider'
+        }}
+      >
+        <Link href="/chat" style={{ textDecoration: 'none' }}>
+          <IconButton 
+            sx={{ 
+              mr: 1,
+              color: 'onSurface.main'
+            }}
+          >
+            <ArrowBackIcon />
+          </IconButton>
         </Link>
+        
         <Avatar
           src={`https://api.dicebear.com/9.x/initials/svg?seed=${getConversationName()}`}
           alt={getConversationName()}
           online={isOnline}
         />
-        <div className="flex-1 ml-3">
-          <h2 className="font-bold text-white">{getConversationName()}</h2>
-          <p className="text-xs text-zinc-400">{isOnline ? 'Online' : 'Offline'}</p>
-        </div>
-        <div className="flex items-center gap-1">
-          <button className="w-9 h-9 rounded-full hover:bg-white/10 flex items-center justify-center">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-            </svg>
-          </button>
-          <ThemeSelector />
-          <button className="w-9 h-9 rounded-full hover:bg-white/10 flex items-center justify-center">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="1" />
-              <circle cx="12" cy="5" r="1" />
-              <circle cx="12" cy="19" r="1" />
-            </svg>
-          </button>
-        </div>
-      </header>
+        
+        <Box sx={{ flex: 1, ml: 2 }}>
+          <Typography variant="titleMedium" sx={{ fontWeight: 600, color: 'onSurface.main' }}>
+            {getConversationName()}
+          </Typography>
+          <Typography variant="bodySmall" sx={{ color: 'onSurfaceVariant.main' }}>
+            {isOnline ? 'Online' : 'Offline'}
+          </Typography>
+        </Box>
+        
+        <Box sx={{ display: 'flex', gap: 0.5 }}>
+          <IconButton sx={{ color: 'onSurfaceVariant.main' }}>
+            <PhoneIcon />
+          </IconButton>
+          <IconButton sx={{ color: 'onSurfaceVariant.main' }}>
+            <MoreVertIcon />
+          </IconButton>
+        </Box>
+      </Paper>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+      {/* Messages Container - Material Design 3 */}
+      <Box 
+        sx={{ 
+          flex: 1, 
+          overflowY: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          bgcolor: 'background.default',
+          width: '100%',
+          '&::-webkit-scrollbar': {
+            width: '8px'
+          },
+          '&::-webkit-scrollbar-track': {
+            bgcolor: 'transparent'
+          },
+          '&::-webkit-scrollbar-thumb': {
+            bgcolor: 'action.hover',
+            borderRadius: '4px'
+          }
+        }}
+      >
+        <Box sx={{ width: '100%', maxWidth: { xs: '100%', sm: '100%', md: '900px', lg: '1000px', xl: '1200px' }, mx: 'auto', px: { xs: 1, sm: 2, md: 3 }, py: 3 }}>
         {isLoading ? (
-          <div className="flex justify-center items-center h-full">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500"></div>
-          </div>
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+            <SquiggleLoader />
+          </Box>
         ) : (
           groupedMessages.map((group, groupIndex) => (
             <div key={groupIndex}>
@@ -251,35 +338,62 @@ export default function ChatWindow() {
                 const position = group.length === 1 ? 'single' : index === 0 ? 'first' : index === group.length - 1 ? 'last' : 'middle'
                 const isLastInGroup = position === 'last' || position === 'single'
                 return (
-                  <MessageBubble
-                    key={message.id}
-                    text={message.content}
-                    sender={message.sender_id === myUserId ? 'me' : 'them'}
-                    time={new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    type={message.media_url ? 'image' : 'text'}
-                    imageUrl={message.media_url}
-                    reactions={message.reactions}
-                    isRead={message.is_read}
-                    onReact={(emoji) => reactToMessage(message.id, emoji)}
-                    onReply={() => setReplyingTo({ id: message.id, sender: message.sender_name, text: message.content, imageUrl: message.media_url })}
-                      replyTo={undefined}
-                    position={position}
-                    senderName={message.sender_name}
-                    isGroup={isGroupChat}
-                    avatarColor={getUserColor(message.sender_name)}
-                    showAvatar={isLastInGroup && message.sender_id !== myUserId}
-                  />
+                  <div 
+                    key={message.id} 
+                    ref={(el) => { messageRefs.current[message.id] = el }}
+                    data-message-id={message.id}
+                    data-sender-id={message.sender_id}
+                  >
+                    <MessageBubble
+                      text={message.content}
+                      sender={message.sender_id === myUserId ? 'me' : 'them'}
+                      time={new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      type={message.message_type || (message.media_url ? 'image' : 'text')}
+                      imageUrl={message.media_url}
+                      reactions={message.reactions}
+                      status={message.status}
+                      onReact={(emoji) => reactToMessage(message.id, emoji)}
+                      onReply={() => setReplyingTo({ id: message.id, sender: message.sender_name, senderId: message.sender_id, text: message.content, imageUrl: message.media_url })}
+                      replyTo={message.reply_to_id ? {
+                        id: message.reply_to_id,
+                        sender: message.quoted_sender_id === myUserId ? 'me' : (message.quoted_sender_name || 'User'),
+                        text: message.quoted_text || 'Message',
+                        imageUrl: message.media_url
+                      } : undefined}
+                      onReplyClick={message.reply_to_id ? () => scrollToMessage(message.reply_to_id) : undefined}
+                      position={position}
+                      senderName={message.sender_name}
+                      // isGroup={isGroupChat}
+                      // avatarColor={getUserColor(message.sender_name)}
+                      showAvatar={isLastInGroup && message.sender_id !== myUserId}
+                    />
+                  </div>
                 )
               })}
             </div>
           ))
         )}
-        {isTyping && <TypingIndicator />}
+        
+        {/* Typing Indicator */}
+        {typingUsers && typingUsers.length > 0 && (
+          <TypingIndicator users={typingUsers} />
+        )}
+        
         <div ref={scrollRef} />
-      </div>
+        </Box>
+      </Box>
 
-      {/* Input */}
-      <div className="p-4 bg-zinc-900/70 backdrop-blur-md border-t border-white/10">
+      {/* Input Container - Material Design 3 */}
+      <Paper 
+        elevation={8}
+        sx={{ 
+          p: 2,
+          borderRadius: 0,
+          bgcolor: 'surfaceContainer.main',
+          borderTop: 1,
+          borderColor: 'divider'
+        }}
+      >
         <AnimatePresence>
           {replyingTo && (
             <motion.div
@@ -311,6 +425,15 @@ export default function ChatWindow() {
           onChange={handleTyping}
           onSend={() => handleSendMessage(newMessage)}
           onAttach={handleFileSelect}
+          onVoiceUpload={(blob, duration) => {
+            const file = new File([blob], 'voice_message.webm', { type: 'audio/webm' })
+            sendMessage({
+              text: '',
+              file: file,
+              voiceDuration: duration,
+              voiceWaveform: Array.from({ length: 30 }, () => Math.floor(Math.random() * 100))
+            })
+          }}
         />
         <input 
           type="file"
@@ -319,7 +442,7 @@ export default function ChatWindow() {
           className="hidden"
           accept="image/*"
         />
-      </div>
-    </div>
+      </Paper>
+    </Box>
   )
 }

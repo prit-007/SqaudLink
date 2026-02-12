@@ -3,64 +3,85 @@
 import { motion, AnimatePresence } from 'framer-motion'
 
 interface TypingIndicatorProps {
-  users?: string[] // Array of usernames who are typing
+  users?: string[]
   isVisible?: boolean
 }
 
 export default function TypingIndicator({ users = [], isVisible = true }: TypingIndicatorProps) {
-  if (!isVisible || users.length === 0) return null
-
-  const displayText = () => {
+  // Logic to determine what text to show
+  const getTypingText = () => {
+    if (!users || users.length === 0) return 'Someone is typing...'
+    
     if (users.length === 1) {
-      return `${users[0]} is typing...`
-    } else if (users.length === 2) {
-      return `${users[0]} and ${users[1]} are typing...`
-    } else {
-      return `${users[0]} and ${users.length - 1} others are typing...`
+      return <><span className="font-bold text-white">{users[0]}</span> is typing...</>
     }
+    if (users.length === 2) {
+      return <><span className="font-bold text-white">{users[0]}</span> and <span className="font-bold text-white">{users[1]}</span> are typing...</>
+    }
+    if (users.length === 3) {
+      return <><span className="font-bold text-white">{users[0]}</span>, <span className="font-bold text-white">{users[1]}</span>, and <span className="font-bold text-white">{users[2]}</span> are typing...</>
+    }
+    return <><span className="font-bold text-white">{users[0]}</span>, <span className="font-bold text-white">{users[1]}</span> and {users.length - 2} others are typing...</>
+  }
+
+  // Dot animation variants for the "Wave" effect
+  const dotVariants = {
+    initial: { y: 0 },
+    animate: { y: -3 },
+  }
+
+  const dotTransition = {
+    duration: 0.5,
+    repeat: Infinity,
+    repeatType: "reverse" as const,
+    ease: "easeInOut" as const,
   }
 
   return (
     <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0, y: 10, scale: 0.95 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: -10, scale: 0.95 }}
-        transition={{ duration: 0.2, ease: 'easeOut' }}
-        className="flex items-center gap-2 px-4 py-2"
-      >
+      {isVisible && users.length > 0 && (
         <motion.div
-          initial={{ scale: 0.8 }}
-          animate={{ scale: 1 }}
-          className="flex items-center gap-1 bg-zinc-800/70 backdrop-blur-sm border border-white/5 rounded-full px-3 py-1.5"
+          initial={{ opacity: 0, y: 10, scale: 0.95 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 10, scale: 0.95 }}
+          transition={{ duration: 0.2 }}
+          className="flex items-center gap-3 px-4 py-2 ml-4 w-fit"
         >
-          {[0, 1, 2].map((i) => (
-            <motion.span
-              key={i}
-              className="w-1.5 h-1.5 bg-purple-400 rounded-full"
-              animate={{
-                scale: [1, 1.3, 1],
-                opacity: [0.4, 1, 0.4],
-                y: [0, -3, 0]
-              }}
-              transition={{
-                duration: 0.8,
-                repeat: Infinity,
-                delay: i * 0.12,
-                ease: 'easeInOut'
-              }}
+          {/* Animated Dots Container */}
+          <div className="flex items-center gap-1 bg-zinc-800/80 backdrop-blur-md border border-white/10 px-2.5 py-2 rounded-2xl shadow-sm h-8">
+            <motion.div
+              variants={dotVariants}
+              initial="initial"
+              animate="animate"
+              transition={{ ...dotTransition, delay: 0 }}
+              className="w-1.5 h-1.5 bg-indigo-400 rounded-full"
             />
-          ))}
+            <motion.div
+              variants={dotVariants}
+              initial="initial"
+              animate="animate"
+              transition={{ ...dotTransition, delay: 0.15 }}
+              className="w-1.5 h-1.5 bg-purple-400 rounded-full"
+            />
+            <motion.div
+              variants={dotVariants}
+              initial="initial"
+              animate="animate"
+              transition={{ ...dotTransition, delay: 0.3 }}
+              className="w-1.5 h-1.5 bg-pink-400 rounded-full"
+            />
+          </div>
+
+          {/* Typing Text */}
+          <motion.p 
+            initial={{ opacity: 0, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="text-xs text-zinc-400 truncate max-w-[200px] select-none"
+          >
+            {getTypingText()}
+          </motion.p>
         </motion.div>
-        <motion.span
-          initial={{ opacity: 0, x: -10 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.1 }}
-          className="text-xs text-purple-400 font-medium"
-        >
-          {displayText()}
-        </motion.span>
-      </motion.div>
+      )}
     </AnimatePresence>
   )
 }

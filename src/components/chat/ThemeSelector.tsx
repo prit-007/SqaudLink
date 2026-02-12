@@ -1,75 +1,101 @@
 'use client'
 
+import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useTheme, themes, Theme } from '@/contexts/ThemeContext'
-import { useState } from 'react'
+import ColorLensIcon from '@mui/icons-material/ColorLens'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 
 export default function ThemeSelector() {
   const { theme, setTheme } = useTheme()
   const [isOpen, setIsOpen] = useState(false)
 
-  const themeColors = {
-    purple: 'bg-gradient-to-br from-violet-600 to-purple-600',
-    blue: 'bg-gradient-to-br from-blue-600 to-cyan-600',
-    green: 'bg-gradient-to-br from-emerald-600 to-teal-600',
-    pink: 'bg-gradient-to-br from-pink-600 to-rose-600',
-    orange: 'bg-gradient-to-br from-orange-600 to-amber-600'
+  // Gradient configurations for the previews
+  const themeGradients: Record<Theme, string> = {
+    purple: 'from-violet-600 to-purple-600',
+    blue: 'from-blue-600 to-cyan-500',
+    green: 'from-emerald-500 to-teal-500',
+    pink: 'from-pink-500 to-rose-500',
+    orange: 'from-orange-500 to-amber-500'
   }
 
   return (
     <div className="relative">
+      {/* Trigger Button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="w-9 h-9 rounded-full hover:bg-white/10 flex items-center justify-center transition-all"
-        title="Change theme"
+        className={`
+          w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300
+          ${isOpen ? 'bg-white text-zinc-900 rotate-180' : 'bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10'}
+        `}
+        title="Change Theme"
       >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" />
-        </svg>
+        <ColorLensIcon sx={{ fontSize: 20 }} />
       </button>
 
       <AnimatePresence>
         {isOpen && (
           <>
-            {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsOpen(false)}
-              className="fixed inset-0 z-40"
-            />
+            {/* Invisible Backdrop to close on click outside */}
+            <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
 
-            {/* Theme Menu */}
+            {/* Glass Palette Panel */}
             <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: -10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: -10 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="absolute top-12 right-0 z-50 bg-zinc-900/95 backdrop-blur-xl border border-white/10 rounded-2xl p-3 shadow-2xl min-w-[200px]"
+              initial={{ opacity: 0, scale: 0.9, y: 10, filter: 'blur(10px)' }}
+              animate={{ opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, scale: 0.9, y: 10, filter: 'blur(10px)' }}
+              transition={{ type: "spring", bounce: 0.3, duration: 0.3 }}
+              className="absolute right-0 top-14 z-50 w-[280px] p-4 bg-zinc-900/90 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-2xl shadow-black/50 origin-top-right"
             >
-              <p className="text-xs text-zinc-400 font-semibold mb-3 px-2">Choose Theme</p>
-              <div className="space-y-1">
-                {(Object.keys(themes) as Theme[]).map((themeKey) => (
-                  <button
-                    key={themeKey}
-                    onClick={() => {
-                      setTheme(themeKey)
-                      setIsOpen(false)
-                    }}
-                    className={`w-full flex items-center gap-3 p-2.5 rounded-xl transition-all hover:bg-white/5 ${
-                      theme === themeKey ? 'bg-white/10' : ''
-                    }`}
-                  >
-                    <div className={`w-6 h-6 rounded-full ${themeColors[themeKey]} ring-2 ring-white/20`} />
-                    <span className="text-sm text-white capitalize">{themeKey}</span>
-                    {theme === themeKey && (
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="ml-auto text-green-400">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                    )}
-                  </button>
-                ))}
+              {/* Header */}
+              <div className="flex items-center justify-between mb-4 px-1">
+                <span className="text-sm font-bold text-white tracking-wide">Appearance</span>
+                <span className="text-[10px] text-zinc-500 bg-white/5 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                  {theme}
+                </span>
+              </div>
+
+              {/* Theme Grid */}
+              <div className="grid grid-cols-1 gap-2">
+                {(Object.keys(themes) as Theme[]).map((themeKey) => {
+                  const isActive = theme === themeKey
+                  
+                  return (
+                    <motion.button
+                      key={themeKey}
+                      onClick={() => setTheme(themeKey)}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      className={`
+                        relative w-full flex items-center gap-3 p-3 rounded-xl transition-all border
+                        ${isActive 
+                          ? 'bg-white/10 border-white/20' 
+                          : 'bg-transparent border-transparent hover:bg-white/5 hover:border-white/5'
+                        }
+                      `}
+                    >
+                      {/* Color Orb */}
+                      <div className={`w-8 h-8 rounded-full bg-gradient-to-br ${themeGradients[themeKey]} shadow-lg ring-1 ring-white/10`} />
+                      
+                      {/* Label */}
+                      <span className={`text-sm font-medium capitalize flex-1 text-left ${isActive ? 'text-white' : 'text-zinc-400'}`}>
+                        {themeKey}
+                      </span>
+
+                      {/* Active Indicator */}
+                      {isActive && (
+                        <motion.div 
+                          layoutId="activeThemeCheck"
+                          initial={{ opacity: 0, scale: 0 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          className="text-white"
+                        >
+                          <CheckCircleIcon sx={{ fontSize: 18 }} />
+                        </motion.div>
+                      )}
+                    </motion.button>
+                  )
+                })}
               </div>
             </motion.div>
           </>

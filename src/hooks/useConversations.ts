@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { RealtimeChannel } from '@supabase/supabase-js'
+import { CryptoService } from '@/utils/crypto-service'
 
 export interface Conversation {
   id: string
@@ -12,6 +13,7 @@ export interface Conversation {
     content: string | null
     created_at: string
     message_type: 'text' | 'image' | 'system'
+    reactions?: Array<{ emoji: string }>
   }
   participants: {
     user_id: string
@@ -75,14 +77,59 @@ export function useConversations() {
           (convosData || []).map(async (convo: any) => {
             const { data: messages } = await supabase
               .from('messages')
-              .select('content, created_at, message_type')
+              .select('id, content, created_at, message_type')
               .eq('conversation_id', convo.id)
               .order('created_at', { ascending: false })
               .limit(1)
             
+            // Decrypt last message if E2EE is enabled
+            const decryptedMessages = await Promise.all(
+              (messages || []).map(async (msg: any) => {
+                let decryptedContent = msg.content
+                
+                // Try to decrypt if E2EE is enabled
+                if (CryptoService.isInitialized() && msg.content) {
+                  try {
+                    // Handle if content is already an object
+                    const parsed = typeof msg.content === 'string' ? JSON.parse(msg.content) : msg.content
+                    if (parsed.content && parsed.deviceKeys) {
+                      decryptedContent = await CryptoService.decryptMessage(parsed)
+                      // Ensure decrypted content is a string
+                      if (typeof decryptedContent !== 'string') {
+                        decryptedContent = '🔒 Encrypted message'
+                      }
+                    }
+                  } catch (error) {
+                    // Not encrypted or parse error, use as-is
+                    // If content is still an object, show placeholder
+                    if (typeof msg.content === 'object') {
+                      decryptedContent = '🔒 Encrypted message'
+                    }
+                  }
+                }
+                
+                // Final safety check
+                if (typeof decryptedContent !== 'string') {
+                  decryptedContent = '🔒 Encrypted message'
+                }
+                
+                // Fetch reactions for last message
+                const { data: reactions } = await supabase
+                  .from('message_reactions')
+                  .select('emoji')
+                  .eq('message_id', msg.id)
+                
+                return {
+                  ...msg,
+                  content: decryptedContent,
+                  reactions: reactions || []
+                }
+              })
+            )
+            
             return {
               ...convo,
-              messages: messages || []
+              messages: decryptedMessages
             }
           })
         )

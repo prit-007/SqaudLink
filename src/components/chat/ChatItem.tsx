@@ -1,5 +1,4 @@
 import React from 'react'
-import Link from 'next/link'
 import Avatar from './Avatar'
 
 interface ChatItemProps {
@@ -29,51 +28,55 @@ export default function ChatItem({
   isActive = false,
   onClick
 }: ChatItemProps) {
-  const content = (
+  return (
     <div
-      className={`
-        flex items-center gap-3 p-3 rounded-xl transition-all cursor-pointer
-        ${isActive
-          ? 'bg-white/10 border border-white/5 shadow-lg shadow-purple-500/10'
-          : 'hover:bg-white/5 border border-transparent hover:border-white/5'}
-      `}
       onClick={onClick}
+      className={`
+        group relative flex items-center gap-3 p-3 mx-2 rounded-2xl transition-all duration-200 cursor-pointer
+        ${isActive 
+          ? 'bg-gradient-to-r from-indigo-500/20 to-purple-500/20 border border-white/10 shadow-lg shadow-indigo-500/5' 
+          : 'hover:bg-white/5 border border-transparent hover:border-white/5'
+        }
+      `}
     >
-      <Avatar
-        src={avatar}
-        alt={name}
-        size="md"
-        online={!isGroup && online}
-      />
+      <div className="relative">
+        <Avatar src={avatar} alt={name} size="md" online={!isGroup && online} />
+        {/* Active Line Indicator for active chat */}
+        {isActive && (
+          <div className="absolute -left-[18px] top-1/2 -translate-y-1/2 w-1 h-8 bg-indigo-500 rounded-r-full shadow-[0_0_10px_rgba(99,102,241,0.5)]" />
+        )}
+      </div>
 
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between mb-0.5">
-          <h3 className={`font-semibold truncate text-sm ${isActive ? 'text-white' : 'text-zinc-200'}`}>
+      <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
+        <div className="flex items-center justify-between">
+          <h3 className={`text-sm font-semibold truncate transition-colors ${isActive ? 'text-white' : 'text-zinc-300 group-hover:text-white'}`}>
             {name}
           </h3>
-          <span className={`text-[10px] ${isActive ? 'text-zinc-300' : 'text-zinc-500'}`}>
+          <span className={`text-[10px] ${unread > 0 ? 'text-indigo-400 font-bold' : 'text-zinc-500'}`}>
             {time}
           </span>
         </div>
         
         <div className="flex items-center justify-between">
-          <p className={`text-xs truncate ${typing ? 'text-purple-400 italic' : 'text-zinc-400'}`}>
+          <div className="flex-1 min-w-0 pr-2">
             {typing ? (
-              <span className="flex items-center gap-1">
-                <span className="inline-flex gap-0.5">
-                  <span className="w-1 h-1 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
-                  <span className="w-1 h-1 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
-                  <span className="w-1 h-1 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+              <span className="flex items-center gap-1 text-xs text-indigo-400 font-medium">
+                <span className="flex gap-0.5 pt-1">
+                  <span className="w-1 h-1 bg-indigo-400 rounded-full animate-[bounce_1s_infinite_0ms]" />
+                  <span className="w-1 h-1 bg-indigo-400 rounded-full animate-[bounce_1s_infinite_200ms]" />
+                  <span className="w-1 h-1 bg-indigo-400 rounded-full animate-[bounce_1s_infinite_400ms]" />
                 </span>
                 Typing...
               </span>
             ) : (
-              lastMessage
+              <p className={`text-xs truncate ${unread > 0 ? 'text-zinc-100 font-medium' : 'text-zinc-400'}`}>
+                {lastMessage}
+              </p>
             )}
-          </p>
+          </div>
           
           {unread > 0 && (
-            <div className="min-w-[18px] h-[18px] px-1.5 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center shadow-lg shadow-purple-500/50">
+            <div className="min-w-[18px] h-[18px] px-1.5 bg-indigo-500 rounded-full flex items-center justify-center shadow-lg shadow-indigo-500/30">
               <span className="text-[10px] font-bold text-white">
                 {unread > 99 ? '99+' : unread}
               </span>
@@ -83,6 +86,4 @@ export default function ChatItem({
       </div>
     </div>
   )
-
-  return content
 }

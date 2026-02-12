@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #FEF7FF;
+  --foreground: #1D1B20;
   --font-inter: 'Inter', system-ui, -apple-system, sans-serif;
   --font-jakarta: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
 }
@@ -16,8 +16,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #141218;
+    --foreground: #E6E0E9;
   }
 }
 
