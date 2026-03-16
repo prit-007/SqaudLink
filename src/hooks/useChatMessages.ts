@@ -7,6 +7,11 @@ import { uploadMedia } from '@/utils/uploadMedia'
 
 export type MessageStatus = 'sending' | 'sent' | 'read';
 
+type MessageReaction = {
+  emoji: string;
+  user_id: string;
+};
+
 export type Message = {
   id: string;
   conversation_id: string;
@@ -31,7 +36,7 @@ export type Message = {
   is_optimistic?: boolean;
   sender_name?: string;
   sender_avatar?: string;
-  reactions?: any[];
+  reactions?: MessageReaction[];
 };
 
 export type SendMessageParams = {
@@ -592,27 +597,31 @@ export function useChatMessages(conversationId: string, myUserId: string) {
 
   // React to message (toggle behavior with optimistic UI)
   const reactToMessage = async (messageId: string, emoji: string) => {
+    const targetMessage = messages.find((message) => message.id === messageId)
+    const existingReactions = targetMessage?.reactions || []
+    const hasReacted = existingReactions.some(
+      (reaction) => reaction.user_id === myUserId && reaction.emoji === emoji
+    )
+
     try {
       // Optimistic UI update - show reaction immediately
       setMessages((prev) =>
         prev.map((m) => {
           if (m.id === messageId) {
-            const existingReactions = m.reactions || []
+            const currentReactions = m.reactions || []
             // Check if user already reacted with this emoji
-            const hasReacted = existingReactions.some(
-              (r: any) => r.user_id === myUserId && r.emoji === emoji
-            )
+            const alreadyReacted = currentReactions.some((reaction) => reaction.user_id === myUserId && reaction.emoji === emoji)
             
-            let newReactions
-            if (hasReacted) {
+            let newReactions: MessageReaction[]
+            if (alreadyReacted) {
               // Remove reaction (toggle off)
-              newReactions = existingReactions.filter(
-                (r: any) => !(r.user_id === myUserId && r.emoji === emoji)
+              newReactions = currentReactions.filter(
+                (reaction) => !(reaction.user_id === myUserId && reaction.emoji === emoji)
               )
             } else {
               // Remove any other reaction from this user (max 1 per user)
-              const withoutUserReactions = existingReactions.filter(
-                (r: any) => r.user_id !== myUserId
+              const withoutUserReactions = currentReactions.filter(
+                (reaction) => reaction.user_id !== myUserId
               )
               // Add new reaction
               newReactions = [...withoutUserReactions, { emoji, user_id: myUserId }]
@@ -636,12 +645,45 @@ export function useChatMessages(conversationId: string, myUserId: string) {
       })
 
       if (error) {
-        // Revert optimistic update on error
-        await fetchMessages()
-        throw error
+        if (hasReacted) {
+          const { error: deleteError } = await supabase
+            .from('message_reactions')
+            .delete()
+            .eq('message_id', messageId)
+            .eq('user_id', myUserId)
+            .eq('emoji', emoji)
+
+          if (deleteError) {
+            await fetchMessages()
+          }
+          return
+        }
+
+        const { error: clearReactionError } = await supabase
+          .from('message_reactions')
+          .delete()
+          .eq('message_id', messageId)
+          .eq('user_id', myUserId)
+
+        if (clearReactionError) {
+          await fetchMessages()
+          return
+        }
+
+        const { error: insertError } = await supabase
+          .from('message_reactions')
+          .insert({
+            message_id: messageId,
+            user_id: myUserId,
+            emoji,
+          })
+
+        if (insertError) {
+          await fetchMessages()
+        }
       }
-    } catch (error) {
-      console.error('React failed:', error)
+    } catch {
+      await fetchMessages()
     }
   }
 
