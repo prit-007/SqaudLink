@@ -6,25 +6,45 @@ interface StoryRingProps {
   username: string
   hasStory?: boolean
   hasUnviewed?: boolean
+  unviewedCount?: number
+  isOpened?: boolean
   isOwn?: boolean
   onClick?: () => void
 }
 
-export default function StoryRing({ src, alt, username, hasStory = false, hasUnviewed = false, isOwn = false, onClick }: StoryRingProps) {
+export default function StoryRing({
+  src,
+  alt,
+  username,
+  hasStory = false,
+  hasUnviewed = false,
+  unviewedCount = 0,
+  isOpened = false,
+  isOwn = false,
+  onClick
+}: StoryRingProps) {
+  const showUnviewed = hasStory && hasUnviewed && unviewedCount > 0
+
   return (
-    <div className="flex flex-col items-center gap-2 cursor-pointer group" onClick={onClick}>
+    <button
+      type="button"
+      className="flex flex-col items-center gap-2 cursor-pointer group outline-none"
+      onClick={onClick}
+      aria-label={`${username} story ${showUnviewed ? `(${unviewedCount} new)` : isOpened ? '(opened)' : ''}`}
+    >
       <div className="relative">
         {/* Story Ring */}
         <div
           className={`
-            relative w-16 h-16 rounded-full p-[2px] transition-all
+            relative w-16 h-16 rounded-full p-[2px] transition-all duration-200
             ${hasStory && hasUnviewed
               ? 'bg-gradient-to-tr from-purple-500 via-pink-500 to-orange-500'
               : hasStory
-              ? 'bg-zinc-600/50'
+              ? 'bg-zinc-500/60'
               : 'bg-zinc-700/50'
             }
-            ${onClick ? 'group-hover:scale-105 active:scale-95' : ''}
+            ${isOpened && !showUnviewed ? 'opacity-75 saturate-50' : ''}
+            ${onClick ? 'group-hover:scale-105 group-focus-visible:scale-105 active:scale-95' : ''}
           `}
         >
           <div className="w-full h-full rounded-full bg-zinc-900 p-[2px]">
@@ -35,6 +55,12 @@ export default function StoryRing({ src, alt, username, hasStory = false, hasUnv
             />
           </div>
         </div>
+
+        {showUnviewed && (
+          <div className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1.5 rounded-full bg-indigo-500 text-[10px] font-bold text-white flex items-center justify-center shadow-lg shadow-indigo-500/40 border border-zinc-900">
+            {unviewedCount > 9 ? '9+' : unviewedCount}
+          </div>
+        )}
 
         {/* Add Story Button (for own story without stories) */}
         {isOwn && !hasStory && (
@@ -47,9 +73,9 @@ export default function StoryRing({ src, alt, username, hasStory = false, hasUnv
       </div>
 
       {/* Username */}
-      <span className="text-[10px] font-medium text-zinc-400 group-hover:text-white transition-colors max-w-[64px] truncate">
-        {username}
+      <span className="text-[10px] font-medium text-zinc-400 group-hover:text-white transition-colors max-w-[72px] truncate">
+        {username}{isOpened && !showUnviewed ? ' • seen' : ''}
       </span>
-    </div>
+    </button>
   )
 }

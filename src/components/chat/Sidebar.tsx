@@ -4,7 +4,6 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
-import Avatar from './Avatar'
 import ChatItem from './ChatItem'
 import StoryRing from './StoryRing'
 import NewChatModal from './NewChatModal'
@@ -42,10 +41,24 @@ export default function Sidebar() {
   const [isStoryUploadOpen, setIsStoryUploadOpen] = useState(false)
   const [isStoryViewerOpen, setIsStoryViewerOpen] = useState(false)
   const [selectedStoryUserId, setSelectedStoryUserId] = useState<string>('')
+  const [openedStoryUsers, setOpenedStoryUsers] = useState<Set<string>>(new Set())
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   
   const { conversations, isLoading, userId } = useConversations()
-  const { storyGroups, myStories, isLoading: storiesLoading, refreshStories } = useStories()
+  const { storyGroups, myStories, isLoading: storiesLoading, refreshStories, markUserStoriesViewed } = useStories()
+
+  const unviewedStoriesCount = storyGroups.reduce((acc, group) => acc + group.unviewed_count, 0)
+
+  const handleOpenStoryViewer = (targetUserId: string) => {
+    setSelectedStoryUserId(targetUserId)
+    setIsStoryViewerOpen(true)
+    setOpenedStoryUsers((prev) => {
+      const next = new Set(prev)
+      next.add(targetUserId)
+      return next
+    })
+    markUserStoriesViewed(targetUserId)
+  }
 
   const handleLogout = async () => {
     const { createClient } = await import('@/utils/supabase/client')
@@ -135,6 +148,16 @@ export default function Sidebar() {
 
       {/* 2. Stories Section (Top) */}
       <div className="pb-4 border-b border-white/5">
+        <div className="px-4 pb-2 flex items-center justify-between">
+          <p className="text-[11px] uppercase tracking-[0.14em] text-zinc-500">Stories</p>
+          {unviewedStoriesCount > 0 ? (
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-400/20">
+              {unviewedStoriesCount} new
+            </span>
+          ) : (
+            <span className="text-[10px] text-zinc-600">All caught up</span>
+          )}
+        </div>
         <div className="overflow-x-auto no-scrollbar px-4">
           <div className="flex gap-4">
             <StoryRing
@@ -145,15 +168,14 @@ export default function Sidebar() {
               hasStory={myStories.length > 0}
               onClick={() => {
                 if (myStories.length > 0) {
-                  setSelectedStoryUserId(userId!)
-                  setIsStoryViewerOpen(true)
+                  handleOpenStoryViewer(userId!)
                 } else {
                   setIsStoryUploadOpen(true)
                 }
               }}
             />
 
-            {storiesLoading ? (
+            {storiesLoading && storyGroups.length === 0 && myStories.length === 0 ? (
               [1, 2, 3].map((i) => (
                 <div key={i} className="flex flex-col items-center gap-1 min-w-[64px] animate-pulse opacity-50">
                   <div className="w-16 h-16 rounded-full bg-zinc-800" />
@@ -170,9 +192,10 @@ export default function Sidebar() {
                   isOwn={false}
                   hasStory={true}
                   hasUnviewed={group.unviewed_count > 0}
+                  unviewedCount={group.unviewed_count}
+                  isOpened={openedStoryUsers.has(group.user_id)}
                   onClick={() => {
-                    setSelectedStoryUserId(group.user_id)
-                    setIsStoryViewerOpen(true)
+                    handleOpenStoryViewer(group.user_id)
                   }}
                 />
               ))
@@ -230,8 +253,16 @@ export default function Sidebar() {
       {selectedStoryUserId && (
         <StoryViewer
           open={isStoryViewerOpen}
-          onClose={() => { setIsStoryViewerOpen(false); refreshStories(); }}
+          onClose={() => { setIsStoryViewerOpen(false) }}
           userId={selectedStoryUserId}
+          onStoryViewed={(viewedUserId: string) => {
+            markUserStoriesViewed(viewedUserId)
+            setOpenedStoryUsers((prev) => {
+              const next = new Set(prev)
+              next.add(viewedUserId)
+              return next
+            })
+          }}
         />
       )}
 
