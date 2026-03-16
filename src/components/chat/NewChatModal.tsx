@@ -25,6 +25,7 @@ export default function NewChatModal({ isOpen, onClose, currentUserId, onConvers
   const [users, setUsers] = useState<User[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [creatingChatUserId, setCreatingChatUserId] = useState<string | null>(null)
   const supabase = createClient()
 
   useEffect(() => {
@@ -59,6 +60,88 @@ export default function NewChatModal({ isOpen, onClose, currentUserId, onConvers
     window.addEventListener('keydown', handleEsc)
     return () => window.removeEventListener('keydown', handleEsc)
   }, [onClose])
+
+  const handleCreateOrOpenChat = async (targetUserId: string) => {
+    if (!currentUserId || currentUserId === targetUserId) return
+
+    setCreatingChatUserId(targetUserId)
+
+    try {
+      // Find candidate conversations shared by both users.
+      const [{ data: myRows, error: myRowsError }, { data: targetRows, error: targetRowsError }] = await Promise.all([
+        supabase
+          .from('conversation_participants')
+          .select('conversation_id')
+          .eq('user_id', currentUserId),
+        supabase
+          .from('conversation_participants')
+          .select('conversation_id')
+          .eq('user_id', targetUserId)
+      ])
+
+      if (myRowsError) throw myRowsError
+      if (targetRowsError) throw targetRowsError
+
+      const myConversationIds = new Set((myRows || []).map((row) => row.conversation_id))
+      const sharedConversationIds = (targetRows || [])
+        .map((row) => row.conversation_id)
+        .filter((conversationId) => myConversationIds.has(conversationId))
+
+      let conversationIdToOpen: string | null = null
+
+      if (sharedConversationIds.length > 0) {
+        const { data: dmConversations, error: dmConversationsError } = await supabase
+          .from('conversations')
+          .select('id')
+          .in('id', sharedConversationIds)
+          .eq('type', 'dm')
+
+        if (dmConversationsError) throw dmConversationsError
+
+        const dmIds = (dmConversations || []).map((c) => c.id)
+
+        if (dmIds.length > 0) {
+          const { data: participantRows, error: participantRowsError } = await supabase
+            .from('conversation_participants')
+            .select('conversation_id')
+            .in('conversation_id', dmIds)
+
+          if (participantRowsError) throw participantRowsError
+
+          const participantCountByConversation = (participantRows || []).reduce<Record<string, number>>((acc, row) => {
+            acc[row.conversation_id] = (acc[row.conversation_id] || 0) + 1
+            return acc
+          }, {})
+
+          conversationIdToOpen = dmIds.find((id) => participantCountByConversation[id] === 2) || null
+        }
+      }
+
+      if (!conversationIdToOpen) {
+        const { data: newConversation, error: createError } = await supabase.rpc('create_new_chat', {
+          is_group: false,
+          chat_name: null,
+          participant_ids: [targetUserId]
+        })
+
+        if (createError) throw createError
+
+        conversationIdToOpen = newConversation?.id || null
+      }
+
+      if (!conversationIdToOpen) {
+        throw new Error('Unable to resolve conversation ID')
+      }
+
+      onConversationCreated(conversationIdToOpen)
+      onClose()
+    } catch (error) {
+      console.error('Failed to create/open chat:', error)
+      alert('Could not open chat. Please try again.')
+    } finally {
+      setCreatingChatUserId(null)
+    }
+  }
 
   return (
     <AnimatePresence>
@@ -112,7 +195,8 @@ export default function NewChatModal({ isOpen, onClose, currentUserId, onConvers
                   {users.map((user) => (
                     <button
                       key={user.id}
-                      onClick={() => onConversationCreated(user.id)} // Logic to create chat simplified for UI
+                      onClick={() => handleCreateOrOpenChat(user.id)}
+                      disabled={creatingChatUserId === user.id}
                       className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition-all group"
                     >
                       <Avatar
@@ -126,7 +210,7 @@ export default function NewChatModal({ isOpen, onClose, currentUserId, onConvers
                         <p className="text-xs text-zinc-500">{user.status}</p>
                       </div>
                       <div className="opacity-0 group-hover:opacity-100 text-xs text-zinc-400 bg-white/10 px-2 py-1 rounded transition-opacity">
-                        Enter
+                        {creatingChatUserId === user.id ? 'Opening...' : 'Enter'}
                       </div>
                     </button>
                   ))}

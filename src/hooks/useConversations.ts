@@ -33,19 +33,48 @@ export function useConversations() {
   const supabase = createClient()
 
   useEffect(() => {
-    let channel: RealtimeChannel
+    let channel: RealtimeChannel | null = null
+    let heartbeatInterval: NodeJS.Timeout | null = null
+    let activeUserId: string | null = null
 
-    const fetchConversations = async () => {
+    const updatePresence = async (status: 'online' | 'offline') => {
+      if (!activeUserId) return
+
       try {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) return
-        setUserId(user.id)
+        await supabase
+          .from('profiles')
+          .update({
+            status,
+            last_seen: new Date().toISOString()
+          })
+          .eq('id', activeUserId)
+      } catch (presenceError) {
+        console.error('Failed to update presence:', presenceError)
+      }
+    }
+
+    const fetchConversations = async (userIdOverride?: string) => {
+      try {
+        let resolvedUserId = userIdOverride
+
+        if (!resolvedUserId) {
+          const { data: { user } } = await supabase.auth.getUser()
+          if (!user) {
+            setConversations([])
+            setIsLoading(false)
+            return
+          }
+          resolvedUserId = user.id
+        }
+
+        activeUserId = resolvedUserId
+        setUserId(resolvedUserId)
 
         // 1. Get all conversation IDs the user is part of
         const { data: myConvos, error: myConvosError } = await supabase
           .from('conversation_participants')
           .select('conversation_id')
-          .eq('user_id', user.id)
+          .eq('user_id', resolvedUserId)
 
         if (myConvosError) throw myConvosError
 
@@ -99,7 +128,7 @@ export function useConversations() {
                         decryptedContent = '🔒 Encrypted message'
                       }
                     }
-                  } catch (error) {
+                  } catch {
                     // Not encrypted or parse error, use as-is
                     // If content is still an object, show placeholder
                     if (typeof msg.content === 'object') {
@@ -145,6 +174,15 @@ export function useConversations() {
           ) || []
           
           const lastMsg = sortedMessages[0]
+          const participants = (convo.participants || [])
+            .filter((p: any) => p.user)
+            .map((p: any) => ({
+              user_id: p.user.id,
+              username: p.user.username,
+              avatar_url: p.user.avatar_url,
+              status: p.user.status,
+              last_seen: p.user.last_seen
+            }))
 
           return {
             id: convo.id,
@@ -153,18 +191,18 @@ export function useConversations() {
             group_avatar_url: convo.group_avatar_url,
             updated_at: convo.updated_at,
             last_message: lastMsg,
-            participants: convo.participants.map((p: any) => ({
-              user_id: p.user.id,
-              username: p.user.username,
-              avatar_url: p.user.avatar_url,
-              status: p.user.status,
-              last_seen: p.user.last_seen
-            })),
+            participants,
             unread_count: 0 // TODO: Implement unread count logic
           }
         })
 
-        setConversations(formattedConversations)
+        const sortedConversations = [...formattedConversations].sort((a, b) => {
+          const aTime = a.last_message?.created_at || a.updated_at
+          const bTime = b.last_message?.created_at || b.updated_at
+          return new Date(bTime).getTime() - new Date(aTime).getTime()
+        })
+
+        setConversations(sortedConversations)
       } catch (err) {
         console.error('Error fetching conversations:', err)
         setError(err as Error)
@@ -173,42 +211,106 @@ export function useConversations() {
       }
     }
 
-    fetchConversations()
+    const initialize = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        setConversations([])
+        setIsLoading(false)
+        return
+      }
 
-    // Subscribe to changes
-    // We want to know if:
-    // 1. A new message is sent in any of our conversations (to update last_message and reorder)
-    // 2. A conversation is updated (e.g. name change)
-    channel = supabase
-      .channel('conversations_list')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'messages'
-        },
-        () => {
-          // Simplest strategy for now: refetch all. 
-          // Optimistic updates for the list are harder than for a single chat.
-          fetchConversations()
+      activeUserId = user.id
+      setUserId(user.id)
+
+      await updatePresence('online')
+      await fetchConversations(user.id)
+
+      // Refresh list on message updates, new conversations, participant changes, and profile presence changes.
+      channel = supabase
+        .channel(`conversations_list:${user.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'messages'
+          },
+          () => fetchConversations(user.id)
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'conversations'
+          },
+          () => fetchConversations(user.id)
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'conversation_participants',
+            filter: `user_id=eq.${user.id}`
+          },
+          () => fetchConversations(user.id)
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'profiles'
+          },
+          () => fetchConversations(user.id)
+        )
+        .subscribe()
+
+      heartbeatInterval = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          void updatePresence('online')
         }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'conversations'
-        },
-        () => {
-          fetchConversations()
+      }, 30000)
+
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'hidden') {
+          void updatePresence('offline')
+        } else {
+          void updatePresence('online')
+          void fetchConversations(user.id)
         }
-      )
-      .subscribe()
+      }
+
+      const handleBeforeUnload = () => {
+        void updatePresence('offline')
+      }
+
+      document.addEventListener('visibilitychange', handleVisibilityChange)
+      window.addEventListener('beforeunload', handleBeforeUnload)
+
+      return () => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange)
+        window.removeEventListener('beforeunload', handleBeforeUnload)
+      }
+    }
+
+    let cleanupVisibilityHandlers: (() => void) | undefined
+    void initialize().then((cleanup) => {
+      cleanupVisibilityHandlers = cleanup
+    })
 
     return () => {
-      supabase.removeChannel(channel)
+      if (channel) {
+        supabase.removeChannel(channel)
+      }
+      if (heartbeatInterval) {
+        clearInterval(heartbeatInterval)
+      }
+      if (cleanupVisibilityHandlers) {
+        cleanupVisibilityHandlers()
+      }
+      void updatePresence('offline')
     }
   }, [])
 
