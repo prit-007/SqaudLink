@@ -12,6 +12,18 @@ type MessageReaction = {
   user_id: string;
 };
 
+const mergeReaction = (reactions: MessageReaction[], incomingReaction: MessageReaction) => {
+  const hasExactReaction = reactions.some(
+    (reaction) => reaction.user_id === incomingReaction.user_id && reaction.emoji === incomingReaction.emoji
+  )
+
+  if (hasExactReaction) {
+    return reactions
+  }
+
+  return [...reactions, incomingReaction]
+}
+
 export type Message = {
   id: string;
   conversation_id: string;
@@ -286,11 +298,11 @@ export function useChatMessages(conversationId: string, myUserId: string) {
         },
         async (payload: any) => {
           // Update local state directly to avoid scroll jump
-          const newReaction = payload.new
+          const newReaction = payload.new as MessageReaction & { message_id: string }
           setMessages((prev) =>
             prev.map((m) =>
               m.id === newReaction.message_id
-                ? { ...m, reactions: [...(m.reactions || []), newReaction] }
+                ? { ...m, reactions: mergeReaction(m.reactions || [], newReaction) }
                 : m
             )
           )

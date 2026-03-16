@@ -1,15 +1,21 @@
 'use client'
 
 import React, { useState, useRef } from 'react'
-import { motion, useMotionValue, useTransform, AnimatePresence } from 'framer-motion'
-import { IconButton, Avatar as MuiAvatar } from '@mui/material'
+import { motion, useMotionValue, useReducedMotion, useTransform, AnimatePresence } from 'framer-motion'
+import { Avatar as MuiAvatar } from '@mui/material'
 import ReplyIcon from '@mui/icons-material/Reply'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import PauseIcon from '@mui/icons-material/Pause'
 import AddReactionOutlinedIcon from '@mui/icons-material/AddReactionOutlined'
+import EastRoundedIcon from '@mui/icons-material/EastRounded'
 import MessageStatus from './MessageStatus'
 import EmojiPicker from './EmojiPicker'
 import MessageContextMenu from './MessageContextMenu'
+
+type MessageReaction = {
+  emoji: string
+  user_id: string
+}
 
 interface MessageBubbleProps {
   text?: string
@@ -17,7 +23,7 @@ interface MessageBubbleProps {
   time: string
   type?: 'text' | 'image' | 'voice' | 'video' | 'file'
   imageUrl?: string
-  reactions?: any[]
+  reactions?: MessageReaction[]
   status?: 'sending' | 'sent' | 'read'
   isEdited?: boolean
   onReact?: (emoji: string) => void
@@ -60,20 +66,20 @@ export default function MessageBubble({
   const [isPlaying, setIsPlaying] = useState(false)
   const [contextMenuAnchor, setContextMenuAnchor] = useState<HTMLElement | null>(null)
   const [emojiPickerAnchor, setEmojiPickerAnchor] = useState<HTMLElement | null>(null)
+  const prefersReducedMotion = useReducedMotion()
 
   // Dynamic border radius for "Chat Cluster" effect
   const borderRadiusClass = () => {
-    const base = "rounded-2xl" // 16px
-    const sharp = "rounded-sm" // 4px
+    const base = 'rounded-[22px]'
     
     if (isMe) {
-      if (position === 'first') return `${base} rounded-tr-${sharp}`
-      if (position === 'middle') return `${base} rounded-tr-${sharp} rounded-br-${sharp}`
-      if (position === 'last') return `${base} rounded-br-${sharp}`
+      if (position === 'first') return `${base} rounded-tr-md`
+      if (position === 'middle') return `${base} rounded-tr-md rounded-br-md`
+      if (position === 'last') return `${base} rounded-br-md`
     } else {
-      if (position === 'first') return `${base} rounded-tl-${sharp}`
-      if (position === 'middle') return `${base} rounded-tl-${sharp} rounded-bl-${sharp}`
-      if (position === 'last') return `${base} rounded-bl-${sharp}`
+      if (position === 'first') return `${base} rounded-tl-md`
+      if (position === 'middle') return `${base} rounded-tl-md rounded-bl-md`
+      if (position === 'last') return `${base} rounded-bl-md`
     }
     return base
   }
@@ -83,19 +89,24 @@ export default function MessageBubble({
   const iconOpacity = useTransform(x, isMe ? [-60, 0] : [0, 60], [1, 0])
   const iconScale = useTransform(x, isMe ? [-60, 0] : [0, 60], [1.2, 0.8])
 
-  const handleDragEnd = (_: any, info: any) => {
+  const handleDragEnd = (_event: MouseEvent | TouchEvent | PointerEvent, info: { offset: { x: number } }) => {
     if (Math.abs(info.offset.x) > 60) {
-      if (navigator.vibrate) navigator.vibrate(20)
+      if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(20)
       onReply?.()
     }
     x.set(0)
   }
 
   const togglePlay = () => {
-    if (audioRef.current) {
-      isPlaying ? audioRef.current.pause() : audioRef.current.play()
-      setIsPlaying(!isPlaying)
+    if (!audioRef.current) return
+
+    if (isPlaying) {
+      audioRef.current.pause()
+    } else {
+      void audioRef.current.play()
     }
+
+    setIsPlaying(!isPlaying)
   }
 
   const formatDuration = (seconds: number) => {
@@ -104,12 +115,30 @@ export default function MessageBubble({
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
+  const waveformBars = voiceWaveform && voiceWaveform.length > 0
+    ? voiceWaveform
+    : Array.from({ length: 24 }, (_unused, index) => 28 + ((index * 17) % 52))
+
   // Group reactions
-  const groupedReactions = reactions?.reduce((acc: any, r: any) => {
-    const existing = acc.find((item: any) => item.emoji === r.emoji)
-    existing ? existing.count++ : acc.push({ emoji: r.emoji, count: 1 })
+  const groupedReactions = reactions?.reduce<Array<{ emoji: string; count: number }>>((acc, reaction) => {
+    const existing = acc.find((item) => item.emoji === reaction.emoji)
+    if (existing) {
+      existing.count += 1
+    } else {
+      acc.push({ emoji: reaction.emoji, count: 1 })
+    }
     return acc
   }, [])
+
+  const bubbleMotion = prefersReducedMotion
+    ? {}
+    : {
+        initial: { opacity: 0, y: 10, scale: 0.98 },
+        animate: { opacity: 1, y: 0, scale: 1 },
+        whileHover: { y: -1 },
+        whileTap: { scale: 0.992 },
+        transition: { duration: 0.2, ease: 'easeOut' },
+      }
 
   return (
     <div className={`relative w-full group flex ${isMe ? 'justify-end' : 'justify-start'} ${position === 'last' || position === 'single' ? 'mb-4' : 'mb-1'}`}>
@@ -156,41 +185,48 @@ export default function MessageBubble({
           onDoubleClick={() => onReact?.('❤️')}
           onContextMenu={(e) => { e.preventDefault(); setContextMenuAnchor(messageRef.current); }}
           className="relative z-10"
+          {...bubbleMotion}
         >
           <div 
             className={`
-              relative overflow-hidden shadow-sm transition-all
+              relative overflow-hidden shadow-sm transition-all duration-200
               ${borderRadiusClass()}
               ${isMe 
-                ? 'bg-gradient-to-br from-indigo-600 to-indigo-700 text-white shadow-indigo-500/20' 
-                : 'bg-zinc-800/80 backdrop-blur-md border border-white/5 text-zinc-100'
+                ? 'bg-gradient-to-br from-indigo-500 via-indigo-600 to-violet-600 text-white shadow-indigo-500/20 ring-1 ring-white/10' 
+                : 'bg-zinc-800/85 backdrop-blur-md border border-white/8 text-zinc-100 shadow-black/20'
               }
             `}
           >
+            <div className={`pointer-events-none absolute inset-0 opacity-80 ${isMe ? 'bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.18),transparent_45%)]' : 'bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.08),transparent_40%)]'}`} />
+
             {/* Reply Context */}
             {replyTo && (
               <div 
                 onClick={onReplyClick}
                 className={`
-                  m-1 mb-1 p-2 rounded-xl flex gap-3 cursor-pointer transition-colors
+                  relative m-1 mb-1 p-2.5 rounded-2xl flex gap-3 cursor-pointer transition-all duration-200
                   ${isMe ? 'bg-black/20 hover:bg-black/30' : 'bg-white/5 hover:bg-white/10'}
-                  border-l-[3px] ${isMe ? 'border-white/50' : 'border-indigo-500'}
+                  border border-white/10
                 `}
               >
+                <div className={`absolute left-0 top-2 bottom-2 w-1 rounded-full ${isMe ? 'bg-white/50' : 'bg-indigo-400'}`} />
                 {replyTo.imageUrl && (
-                  <img src={replyTo.imageUrl} alt="" className="w-10 h-10 rounded-lg object-cover" />
+                  <img src={replyTo.imageUrl} alt="" className="w-11 h-11 rounded-xl object-cover ml-2 shadow-sm" />
                 )}
-                <div className="flex-1 min-w-0 overflow-hidden">
-                  <p className="text-[11px] font-bold opacity-90 truncate">{replyTo.sender}</p>
+                <div className="flex-1 min-w-0 overflow-hidden ml-2">
+                  <p className="text-[11px] font-bold opacity-90 truncate flex items-center gap-1">
+                    <ReplyIcon sx={{ fontSize: 12 }} /> {replyTo.sender}
+                  </p>
                   <p className="text-[11px] opacity-75 truncate">{replyTo.text || 'Photo'}</p>
                 </div>
+                <EastRoundedIcon sx={{ fontSize: 16 }} className="self-center opacity-50" />
               </div>
             )}
 
             {/* Media Content */}
             {imageUrl && type === 'image' && (
               <div className="relative">
-                <img src={imageUrl} alt="Attachment" className="w-full h-auto max-h-[400px] object-cover" />
+                <img src={imageUrl} alt="Attachment" className="w-full h-auto max-h-[400px] object-cover transition-transform duration-300 group-hover:scale-[1.01]" />
                 {/* Gradient Overlay for text on image */}
                 {text && <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />}
               </div>
@@ -199,7 +235,7 @@ export default function MessageBubble({
             {/* Text Content */}
             {(text || type === 'voice') && (
               <div className={`
-                px-3 py-2
+                px-3.5 py-2.5
                 ${type === 'image' && text ? 'pt-2 pb-6 absolute bottom-0 left-0 right-0' : ''}
               `}>
                 
@@ -208,16 +244,16 @@ export default function MessageBubble({
                   <div className="flex items-center gap-3 py-1">
                     <button 
                       onClick={togglePlay}
-                      className={`p-2 rounded-full transition-colors ${isMe ? 'bg-white/20 hover:bg-white/30' : 'bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-400'}`}
+                      className={`p-2.5 rounded-full transition-colors ${isMe ? 'bg-white/20 hover:bg-white/30' : 'bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-400'}`}
                     >
                       {isPlaying ? <PauseIcon fontSize="small" /> : <PlayArrowIcon fontSize="small" />}
                     </button>
                     <div className="flex-1 flex items-center gap-0.5 h-6">
-                      {(voiceWaveform || Array.from({length: 24})).map((val: any, i) => (
+                      {waveformBars.map((value, index) => (
                         <div 
-                          key={i} 
+                          key={index} 
                           className={`w-1 rounded-full ${isMe ? 'bg-white/70' : 'bg-indigo-400/50'}`}
-                          style={{ height: `${Math.max(20, typeof val === 'number' ? val : Math.random() * 100)}%` }} 
+                          style={{ height: `${Math.max(20, value)}%` }} 
                         />
                       ))}
                     </div>
@@ -228,7 +264,7 @@ export default function MessageBubble({
 
                 {/* Actual Text */}
                 {type !== 'voice' && (
-                  <p className="whitespace-pre-wrap text-[15px] leading-relaxed break-words">
+                  <p className="whitespace-pre-wrap text-[15px] sm:text-[15.5px] leading-[1.45] break-words tracking-[0.01em]">
                     {text}
                   </p>
                 )}
@@ -237,12 +273,25 @@ export default function MessageBubble({
 
             {/* Metadata Footer */}
             <div className={`
-              flex items-center justify-end gap-1 px-3 pb-2 pt-0
+              relative z-10 flex items-center justify-between gap-2 px-3.5 pb-2.5 pt-0
               ${type === 'image' && !text ? 'absolute bottom-0 right-0 p-2 bg-black/40 rounded-tl-xl backdrop-blur-sm' : ''}
             `}>
-              {isEdited && <span className="text-[9px] opacity-60 italic">edited</span>}
-              <span className="text-[10px] opacity-60 min-w-[30px] text-right">{time}</span>
-              {isMe && <MessageStatus status={status} />}
+              <div className="flex items-center gap-1.5 text-[10px] opacity-70">
+                {onReply && (
+                  <button
+                    onClick={onReply}
+                    className={`inline-flex items-center gap-1 rounded-full px-2 py-1 transition-colors ${isMe ? 'bg-white/10 hover:bg-white/15' : 'bg-white/5 hover:bg-white/10'} md:opacity-0 md:group-hover:opacity-100`}
+                  >
+                    <ReplyIcon sx={{ fontSize: 12 }} />
+                    <span className="font-medium">Reply</span>
+                  </button>
+                )}
+                {isEdited && <span className="text-[9px] italic">edited</span>}
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] opacity-60 min-w-[30px] text-right">{time}</span>
+                {isMe && <MessageStatus status={status} />}
+              </div>
             </div>
           </div>
         </motion.div>
@@ -267,22 +316,23 @@ export default function MessageBubble({
 
         {/* Reactions Pills */}
         <AnimatePresence>
-          {groupedReactions.length > 0 && (
+          {groupedReactions && groupedReactions.length > 0 && (
             <div className={`flex flex-wrap gap-1 mt-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
-              {groupedReactions.map((r: any, i: number) => (
+              {groupedReactions.map((reaction, index) => (
                 <motion.button
-                  key={i}
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  onClick={() => onReact?.(r.emoji)}
+                  key={`${reaction.emoji}-${index}`}
+                  initial={prefersReducedMotion ? false : { scale: 0.92, opacity: 0 }}
+                  animate={prefersReducedMotion ? {} : { scale: 1, opacity: 1 }}
+                  transition={{ duration: 0.16, delay: index * 0.02 }}
+                  onClick={() => onReact?.(reaction.emoji)}
                   className="
-                    flex items-center gap-1 px-2 py-0.5 rounded-full 
-                    bg-zinc-800/80 border border-white/5 shadow-sm 
-                    text-xs hover:bg-zinc-700 transition-colors
+                    flex items-center gap-1 px-2.5 py-1 rounded-full 
+                    bg-zinc-800/85 border border-white/10 shadow-sm 
+                    text-xs hover:bg-zinc-700 transition-colors backdrop-blur-sm
                   "
                 >
-                  <span>{r.emoji}</span>
-                  {r.count > 1 && <span className="font-bold text-indigo-400">{r.count}</span>}
+                  <span>{reaction.emoji}</span>
+                  {reaction.count > 1 && <span className="font-bold text-indigo-400">{reaction.count}</span>}
                 </motion.button>
               ))}
             </div>

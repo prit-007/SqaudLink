@@ -18,6 +18,7 @@ import ChatInput from '@/components/chat/ChatInput'
 import TypingIndicator from '@/components/chat/TypingIndicator'
 import ThemeSelector from '@/components/chat/ThemeSelector'
 import SquiggleLoader from '@/components/chat/SquiggleLoader'
+import ReplyPreview from '@/components/chat/ReplyPreview'
 
 export default function ChatWindow() {
   const params = useParams()
@@ -402,21 +403,13 @@ export default function ChatWindow() {
               exit={{ height: 0, opacity: 0 }}
               className="overflow-hidden"
             >
-              <div className="bg-zinc-800/50 p-2 rounded-lg mb-2 border-l-4 border-purple-500">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="text-sm font-bold text-purple-400">Replying to {replyingTo.sender}</p>
-                    <p className="text-xs text-zinc-300 truncate max-w-xs">
-                      {replyingTo.text || 'Image'}
-                    </p>
-                  </div>
-                  <button onClick={() => setReplyingTo(null)} className="p-1 rounded-full hover:bg-white/10">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M18 6L6 18M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
+              <ReplyPreview
+                sender={replyingTo.sender === 'me' ? 'yourself' : replyingTo.sender}
+                text={replyingTo.text}
+                imageUrl={replyingTo.imageUrl}
+                color="bg-gradient-to-b from-indigo-400 to-violet-500"
+                onDismiss={() => setReplyingTo(null)}
+              />
             </motion.div>
           )}
         </AnimatePresence>
